@@ -1,0 +1,3 @@
+# Private keys are NEVER committed.
+# Place collector.pub (base64 Ed25519 public key) here after generation.
+# Run: python backend/seed_trusted_key.py to register it.
