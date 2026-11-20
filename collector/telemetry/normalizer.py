@@ -178,3 +178,4 @@ def collect_normalized_telemetry() -> Dict[str, Any]:
     """
     raw = collect_system_metrics()
     return normalize_metrics(raw)
+

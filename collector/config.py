@@ -66,3 +66,4 @@ PII_FIELD_BLOCKLIST: list = [
 
 # Maximum payload size the collector will transmit (bytes)
 MAX_PAYLOAD_BYTES: int = int(os.getenv("DATACAT_MAX_PAYLOAD_BYTES", str(900 * 1024)))
+

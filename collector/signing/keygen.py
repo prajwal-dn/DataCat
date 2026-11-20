@@ -67,3 +67,4 @@ if __name__ == "__main__":
     print(f"  Public key  (share with backend): {pub}")
     print("\nNext step: register the public key with the backend.")
     print("  python backend/seed_trusted_key.py --tenant-id <UUID> --pub-key-file", pub)
+

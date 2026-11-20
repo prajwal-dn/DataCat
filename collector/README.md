@@ -165,3 +165,4 @@ Expected: **84 passed** (49 backend + 35 collector).
 - The backend only accepts events signed with a pre-registered public key.
 - Supplying a different public key in the `receipt.public_key` field is rejected.
 - The signing message binds `tenant_id` cryptographically — a key registered for tenant A cannot forge events for tenant B.
+

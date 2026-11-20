@@ -137,3 +137,4 @@ def transmit(
             event_id=event_id,
             error=str(exc),
         )
+
