@@ -21,3 +21,4 @@ MAX_PAYLOAD_BYTES = 1_048_576  # 1 MB hard limit on raw request body
 # Dashboard
 EVENTS_DEFAULT_LIMIT = 50
 EVENTS_MAX_LIMIT = 500
+

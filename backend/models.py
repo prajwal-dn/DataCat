@@ -1,6 +1,5 @@
 """
-Pydantic models — exact field names from docs/api-contract.md.
-Do not rename fields without updating the shared contract.
+Pydantic models — exact field names and structures.
 """
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
@@ -23,8 +22,8 @@ class EventPayload(BaseModel):
 
 class Receipt(BaseModel):
     payload_hash: str = Field(..., description="Hex-encoded SHA-256 of canonical JSON of event object")
-    signature: str = Field(..., description="Base64-encoded Ed25519 signature over payload_hash bytes")
-    public_key: str = Field(..., description="Base64-encoded Ed25519 public key (32 bytes) — verified against registry")
+    signature: str = Field(..., description="Base64-encoded Ed25519 signature")
+    public_key: str = Field(..., description="Base64-encoded Ed25519 public key")
     signed_at: str = Field(..., description="ISO-8601 UTC timestamp of signing")
 
 
@@ -67,7 +66,7 @@ class IngestAccepted(BaseModel):
 
 class IngestRejected(BaseModel):
     status: str = "rejected"
-    reason: str   # hash_mismatch | invalid_signature | duplicate_event | unknown_collector | untrusted_key | tenant_mismatch
+    reason: str
     detail: str
 
 
@@ -81,10 +80,10 @@ class EventRecord(BaseModel):
     timestamp: str
     source_host: str
     event_type: str
-    status: str
+    status: str = "accepted"
     hash_verified: bool
     signature_verified: bool
-    rejected_reason: Optional[str]
+    rejected_reason: Optional[str] = None
     ingested_at: str
 
 
@@ -115,9 +114,9 @@ class StatsResponse(BaseModel):
 class IncidentRecord(BaseModel):
     event_id: str
     tenant_id: str
-    incident_type: str   # signature_failure | hash_mismatch | duplicate | unknown_collector | untrusted_key
-    timestamp: str
-    source_host: str
+    incident_type: str
+    timestamp: Optional[str]
+    source_host: Optional[str]
     detail: str
 
 
