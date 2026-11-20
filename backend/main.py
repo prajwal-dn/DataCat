@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from backend.config import APP_VERSION, APP_TITLE, MAX_PAYLOAD_BYTES
 from backend.database import init_db
-from backend.routers import ingest, events, stats, incidents, health as health_router
+from backend.routers import ingest, events, stats, incidents, health as health_router, aiops as aiops_router
 
 _START_TIME = time.monotonic()
 
@@ -56,6 +56,7 @@ app.include_router(events.router, prefix="/api/v1", tags=["events"])
 app.include_router(stats.router, prefix="/api/v1", tags=["stats"])
 app.include_router(incidents.router, prefix="/api/v1", tags=["incidents"])
 app.include_router(health_router.router, prefix="/api/v1", tags=["health"])
+app.include_router(aiops_router.router, prefix="/api/v1/aiops", tags=["aiops"])
 
 # ----- Dashboard static files -----
 DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard"

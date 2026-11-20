@@ -79,6 +79,7 @@ def build_valid_event(
     wrong_tenant_in_sig: str = None,
     wrong_pubkey_b64: str = None,
     source_host: str = "test-host-01",
+    custom_payload: dict = None,
 ) -> dict:
     """
     Build a valid ingest request dict with domain-separated signature.
@@ -89,7 +90,7 @@ def build_valid_event(
         "timestamp": "2026-11-20T14:00:00Z",
         "source_host": source_host,
         "event_type": event_type,
-        "payload": {"cpu_pct": 42.5, "mem_mb": 1024},
+        "payload": custom_payload if custom_payload is not None else {"cpu_pct": 42.5, "mem_mb": 1024},
         "privacy_tags": ["pii_removed"],
     }
 

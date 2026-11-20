@@ -509,6 +509,13 @@
     margin-bottom: 24px;
   }
 
+  .kpi-grid-5 {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
   .kpi-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
@@ -558,7 +565,7 @@
   .kpi-sig .kpi-value { color: var(--status-error); }
   .kpi-dup .kpi-value { color: var(--status-neutral); }
 
-  /* Section B — Transmission Integrity Banner */
+  /* Transmission Integrity Banner */
   .integrity-strip {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
@@ -629,7 +636,7 @@
     gap: 4px;
   }
 
-  /* Section C & D — Content Tables */
+  /* Content Tables */
   .table-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
@@ -771,7 +778,7 @@
     cursor: not-allowed;
   }
 
-  /* Section D — Rejection Incident List */
+  /* Incidents & AIOps Cards */
   .incident-list-wrap {
     display: flex;
     flex-direction: column;
@@ -792,12 +799,11 @@
     gap: 16px;
   }
 
-  .incident-row.reason-hash {
-    border-left-color: var(--status-warning);
-  }
-  .incident-row.reason-dup {
-    border-left-color: var(--status-neutral);
-  }
+  .incident-row.reason-hash { border-left-color: var(--status-warning); }
+  .incident-row.reason-dup { border-left-color: var(--status-neutral); }
+  .incident-row.sev-critical { border-left-color: var(--status-error); }
+  .incident-row.sev-high { border-left-color: #D97706; }
+  .incident-row.sev-medium { border-left-color: var(--status-warning); }
 
   .incident-body {
     flex: 1;
@@ -809,13 +815,14 @@
     align-items: center;
     gap: 8px;
     margin-bottom: 4px;
+    flex-wrap: wrap;
   }
 
   .incident-id {
     font-family: var(--font-mono);
     font-size: 11.5px;
     color: var(--text-primary);
-    font-weight: 500;
+    font-weight: 600;
   }
 
   .incident-meta-line {
@@ -824,6 +831,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
   }
 
   .incident-time {
@@ -833,7 +841,34 @@
     white-space: nowrap;
   }
 
-  /* Section E — Platform Status */
+  /* AIOps Recommendation Box */
+  .recommendation-box {
+    margin-top: 10px;
+    background: #FAF9F5;
+    border: 1px solid #EBE8DE;
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+  }
+
+  .recommendation-title {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #4A4A45;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 4px;
+  }
+
+  .recommendation-text {
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.5;
+  }
+
+  /* Platform Status */
   .platform-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
@@ -879,16 +914,10 @@
 
   /* Responsive Rules */
   @media (max-width: 1180px) {
-    .kpi-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-    .integrity-strip {
-      grid-template-columns: 1fr;
-      gap: 14px;
-    }
-    .platform-card {
-      grid-template-columns: repeat(2, 1fr);
-    }
+    .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+    .kpi-grid-5 { grid-template-columns: repeat(3, 1fr); }
+    .integrity-strip { grid-template-columns: 1fr; gap: 14px; }
+    .platform-card { grid-template-columns: repeat(2, 1fr); }
   }
 
   @media (max-width: 860px) {
@@ -899,28 +928,14 @@
       border-right: none;
       border-bottom: 1px solid var(--sidebar-border);
     }
-    body {
-      flex-direction: column;
-    }
-    .main-wrapper {
-      margin-left: 0;
-    }
-    .kpi-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    #tenant-input, #token-input {
-      width: 100%;
-    }
-    .auth-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    .auth-status-chip {
-      margin-left: 0;
-    }
-    .platform-card {
-      grid-template-columns: 1fr;
-    }
+    body { flex-direction: column; }
+    .main-wrapper { margin-left: 0; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .kpi-grid-5 { grid-template-columns: repeat(2, 1fr); }
+    #tenant-input, #token-input { width: 100%; }
+    .auth-row { flex-direction: column; align-items: stretch; }
+    .auth-status-chip { margin-left: 0; }
+    .platform-card { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -943,6 +958,10 @@
       <svg class="icon" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
       Overview
     </a>
+    <a class="nav-item" href="#sec-aiops" onclick="setActiveNav(this)">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      AIOps Intelligence
+    </a>
     <a class="nav-item" href="#sec-transmissions" onclick="setActiveNav(this)">
       <svg class="icon" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Transmissions
@@ -950,10 +969,6 @@
     <a class="nav-item" href="#sec-audit" onclick="setActiveNav(this)">
       <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
       Privacy Audit
-    </a>
-    <a class="nav-item" href="#sec-audit" onclick="setActiveNav(this)">
-      <svg class="icon" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
-      Security Incidents
     </a>
     <a class="nav-item" href="#sec-status" onclick="setActiveNav(this)">
       <svg class="icon" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
@@ -1026,7 +1041,7 @@
       </div>
       <div class="empty-title">Authentication Required</div>
       <div class="empty-desc">
-        Enter your registered Tenant UUID and Dashboard API Token above to inspect cryptographically verified transmissions and security audit logs.
+        Enter your registered Tenant UUID and Dashboard API Token above to inspect cryptographically verified transmissions, explainable AIOps insights, and security audit logs.
       </div>
     </div>
 
@@ -1128,6 +1143,125 @@
           </div>
         </div>
       </div>
+
+      <!-- NEW SECTION: AIOps Intelligence -->
+      <section id="sec-aiops" style="margin-bottom: 28px;">
+        <div class="section-header">
+          <div class="section-title">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            Explainable AIOps Intelligence
+          </div>
+          <div class="section-sub">Deterministic Baseline (MAD) · Dynamic Correlation · Diagnostic Guidance</div>
+        </div>
+
+        <!-- A. AIOps Overview KPI -->
+        <div class="kpi-grid-5">
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Infra Health</span>
+              <span class="kpi-tag" id="aiops-health-tag">STATUS</span>
+            </div>
+            <div class="kpi-value" style="font-size:18px;text-transform:uppercase;" id="aiops-health-val">—</div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Hosts Monitored</span>
+              <span class="kpi-tag badge-neutral">HOSTS</span>
+            </div>
+            <div class="kpi-value" id="aiops-hosts-val">0</div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Events Analyzed</span>
+              <span class="kpi-tag badge-neutral">SAMPLES</span>
+            </div>
+            <div class="kpi-value" id="aiops-events-val">0</div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Anomaly Signals</span>
+              <span class="kpi-tag badge-warning">ANOMALIES</span>
+            </div>
+            <div class="kpi-value" id="aiops-anomalies-val" style="color:var(--status-warning);">0</div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Correlated Incidents</span>
+              <span class="kpi-tag badge-error">INCIDENTS</span>
+            </div>
+            <div class="kpi-value" id="aiops-incidents-val" style="color:var(--status-error);">0</div>
+          </div>
+        </div>
+
+        <!-- B. Latest Metric Observations Table -->
+        <div class="table-card" style="margin-bottom: 20px;">
+          <div style="padding:10px 14px;background:#FAFAF8;border-bottom:1px solid var(--border-color);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);">
+            Latest Telemetry Observations by Host
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Host</th>
+                  <th>CPU Usage</th>
+                  <th>Memory</th>
+                  <th>Disk</th>
+                  <th>Latency</th>
+                  <th>Packet Loss</th>
+                  <th>Failed Logins</th>
+                  <th>Last Observed (UTC)</th>
+                </tr>
+              </thead>
+              <tbody id="aiops-metrics-body">
+                <tr><td colspan="8" class="loading-cell">No metric observations yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- D. Correlated Incidents & Recommendations -->
+        <div style="margin-bottom: 20px;">
+          <div style="font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:8px;">
+            Correlated Incidents &amp; Diagnostic Recommendations
+          </div>
+          <div id="aiops-incidents-container" class="incident-list-wrap">
+            <div class="loading-cell" style="background:#fff;border:1px solid var(--border-color);border-radius:var(--radius-md);">
+              No correlated incidents detected.
+            </div>
+          </div>
+        </div>
+
+        <!-- C. Detected Anomalies Feed -->
+        <div>
+          <div style="font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:8px;">
+            Detected Anomaly Signals (MAD Baseline &amp; Thresholds)
+          </div>
+          <div class="table-card">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Host</th>
+                    <th>Metric</th>
+                    <th>Observed</th>
+                    <th>Threshold / Baseline</th>
+                    <th>Severity</th>
+                    <th>Detection Method</th>
+                    <th>Explanation</th>
+                  </tr>
+                </thead>
+                <tbody id="aiops-anomalies-body">
+                  <tr><td colspan="7" class="loading-cell">No anomalies detected.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- Section C — Recent Verified Transmissions -->
       <section id="sec-transmissions" style="margin-bottom: 24px;">
@@ -1335,10 +1469,11 @@ async function loadTenantData() {
 
   try {
     const tid = encodeURIComponent(activeTenant);
-    const [stats, events, incidents] = await Promise.all([
+    const [stats, events, incidents, aiops] = await Promise.all([
       apiFetch(`/api/v1/stats?tenant_id=${tid}`),
       apiFetch(`/api/v1/events?tenant_id=${tid}&limit=${PAGE_SIZE}&offset=${currentPage * PAGE_SIZE}`),
-      apiFetch(`/api/v1/incidents?tenant_id=${tid}&limit=50`)
+      apiFetch(`/api/v1/incidents?tenant_id=${tid}&limit=50`),
+      apiFetch(`/api/v1/aiops/overview?tenant_id=${tid}`)
     ]);
 
     document.getElementById('tenant-prompt').style.display = 'none';
@@ -1366,7 +1501,272 @@ async function loadTenantData() {
     document.getElementById('rate-crypto-val').textContent = `${cryptoPassRate}%`;
     document.getElementById('rate-crypto-bar').style.width = `${cryptoPassRate}%`;
 
+    // ─────────────────────────────────────────────────────────────
+    // AIOps Intelligence Section Rendering
+    // ─────────────────────────────────────────────────────────────
+    const healthBadge = document.getElementById('aiops-health-badge');
+    const healthVal = document.getElementById('aiops-health-val');
+    const healthTag = document.getElementById('aiops-health-tag');
+
+    healthVal.textContent = aiops.health_status;
+    if (aiops.health_status === 'healthy') {
+      healthVal.style.color = 'var(--status-success)';
+      healthTag.className = 'kpi-tag badge-success';
+      healthTag.textContent = 'HEALTHY';
+    } else if (aiops.health_status === 'critical') {
+      healthVal.style.color = 'var(--status-error)';
+      healthTag.className = 'kpi-tag badge-error';
+      healthTag.textContent = 'CRITICAL';
+    } else if (aiops.health_status === 'degraded') {
+      healthVal.style.color = 'var(--status-warning)';
+      healthTag.className = 'kpi-tag badge-warning';
+      healthTag.textContent = 'DEGRADED';
+    } else {
+      healthVal.style.color = 'var(--status-neutral)';
+      healthTag.className = 'kpi-tag badge-neutral';
+      healthTag.textContent = 'NO DATA';
+    }
+
+    document.getElementById('aiops-hosts-val').textContent = aiops.hosts_monitored;
+    document.getElementById('aiops-events-val').textContent = aiops.events_analyzed;
+    document.getElementById('aiops-anomalies-val').textContent = aiops.anomaly_count;
+    document.getElementById('aiops-incidents-val').textContent = aiops.correlated_incident_count;
+
+    // Latest Metric Observations Table
+    const metricsBody = document.getElementById('aiops-metrics-body');
+    clearElement(metricsBody);
+
+    if (!aiops.latest_metrics || aiops.latest_metrics.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 8;
+      td.className = 'loading-cell';
+      td.textContent = 'No host metric samples recorded yet.';
+      tr.appendChild(td);
+      metricsBody.appendChild(tr);
+    } else {
+      aiops.latest_metrics.forEach(m => {
+        const tr = document.createElement('tr');
+
+        const tdHost = document.createElement('td');
+        tdHost.className = 'mono-id';
+        tdHost.textContent = m.source_host;
+        tr.appendChild(tdHost);
+
+        const tdCpu = document.createElement('td');
+        tdCpu.className = 'mono-id';
+        tdCpu.textContent = m.cpu_usage != null ? `${m.cpu_usage.toFixed(1)}%` : '—';
+        tr.appendChild(tdCpu);
+
+        const tdMem = document.createElement('td');
+        tdMem.className = 'mono-id';
+        tdMem.textContent = m.memory_usage != null ? `${m.memory_usage.toFixed(1)}%` : '—';
+        tr.appendChild(tdMem);
+
+        const tdDisk = document.createElement('td');
+        tdDisk.className = 'mono-id';
+        tdDisk.textContent = m.disk_usage != null ? `${m.disk_usage.toFixed(1)}%` : '—';
+        tr.appendChild(tdDisk);
+
+        const tdLat = document.createElement('td');
+        tdLat.className = 'mono-id';
+        tdLat.textContent = m.network_latency_ms != null ? `${m.network_latency_ms.toFixed(0)} ms` : '—';
+        tr.appendChild(tdLat);
+
+        const tdPkt = document.createElement('td');
+        tdPkt.className = 'mono-id';
+        tdPkt.textContent = m.packet_loss_pct != null ? `${m.packet_loss_pct.toFixed(1)}%` : '—';
+        tr.appendChild(tdPkt);
+
+        const tdLogins = document.createElement('td');
+        tdLogins.className = 'mono-id';
+        tdLogins.textContent = m.failed_login_count != null ? `${m.failed_login_count.toFixed(0)}` : '—';
+        tr.appendChild(tdLogins);
+
+        const tdTs = document.createElement('td');
+        tdTs.className = 'mono-id';
+        tdTs.textContent = (m.latest_timestamp || '').replace('T', ' ').replace('Z', '');
+        tr.appendChild(tdTs);
+
+        metricsBody.appendChild(tr);
+      });
+    }
+
+    // Correlated Incidents & Recommendations Feed
+    const aiopsIncContainer = document.getElementById('aiops-incidents-container');
+    clearElement(aiopsIncContainer);
+
+    if (!aiops.incidents || aiops.incidents.length === 0) {
+      const okDiv = document.createElement('div');
+      okDiv.className = 'loading-cell';
+      okDiv.style.background = '#FFFFFF';
+      okDiv.style.border = '1px solid var(--border-color)';
+      okDiv.style.borderRadius = 'var(--radius-md)';
+      okDiv.style.color = 'var(--status-success)';
+      okDiv.textContent = '✓ No correlated infrastructure incidents detected across active hosts.';
+      aiopsIncContainer.appendChild(okDiv);
+    } else {
+      aiops.incidents.forEach(inc => {
+        const card = document.createElement('div');
+        card.className = 'incident-row';
+        if (inc.severity === 'CRITICAL') card.classList.add('sev-critical');
+        else if (inc.severity === 'HIGH') card.classList.add('sev-high');
+        else card.classList.add('sev-medium');
+
+        const body = document.createElement('div');
+        body.className = 'incident-body';
+
+        const headLine = document.createElement('div');
+        headLine.className = 'incident-header-line';
+
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        if (inc.severity === 'CRITICAL') badge.classList.add('badge-error');
+        else if (inc.severity === 'HIGH') badge.classList.add('badge-error');
+        else badge.classList.add('badge-warning');
+        badge.textContent = inc.severity;
+        headLine.appendChild(badge);
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'incident-id';
+        titleSpan.textContent = inc.title;
+        headLine.appendChild(titleSpan);
+
+        const hostPill = document.createElement('span');
+        hostPill.className = 'mono-type';
+        hostPill.textContent = inc.source_host;
+        headLine.appendChild(hostPill);
+
+        const countBadge = document.createElement('span');
+        countBadge.className = 'badge badge-neutral';
+        countBadge.textContent = `${inc.signal_count} signals`;
+        headLine.appendChild(countBadge);
+
+        body.appendChild(headLine);
+
+        const explanationDiv = document.createElement('div');
+        explanationDiv.style.fontSize = '12px';
+        explanationDiv.style.color = 'var(--text-secondary)';
+        explanationDiv.style.marginTop = '4px';
+        explanationDiv.textContent = inc.explanation;
+        body.appendChild(explanationDiv);
+
+        if (inc.evidence && inc.evidence.length > 0) {
+          const evList = document.createElement('div');
+          evList.style.display = 'flex';
+          evList.style.flexWrap = 'wrap';
+          evList.style.gap = '6px';
+          evList.style.marginTop = '6px';
+
+          inc.evidence.forEach(evText => {
+            const evChip = document.createElement('span');
+            evChip.className = 'protocol-chip';
+            evChip.textContent = evText;
+            evList.appendChild(evChip);
+          });
+          body.appendChild(evList);
+        }
+
+        // Recommendation Box
+        const recBox = document.createElement('div');
+        recBox.className = 'recommendation-box';
+
+        const recTitle = document.createElement('div');
+        recTitle.className = 'recommendation-title';
+        recTitle.textContent = 'Diagnostic Recommendation:';
+        recBox.appendChild(recTitle);
+
+        const recText = document.createElement('div');
+        recText.className = 'recommendation-text';
+        recText.textContent = inc.suggested_recommendation;
+        recBox.appendChild(recText);
+
+        body.appendChild(recBox);
+        card.appendChild(body);
+
+        const timeCol = document.createElement('div');
+        timeCol.className = 'incident-time';
+        timeCol.style.textAlign = 'right';
+        const startSpan = document.createElement('div');
+        startSpan.textContent = `Start: ${(inc.first_seen || '').replace('T', ' ').replace('Z', '')}`;
+        timeCol.appendChild(startSpan);
+        const endSpan = document.createElement('div');
+        endSpan.textContent = `Last: ${(inc.last_seen || '').replace('T', ' ').replace('Z', '')}`;
+        timeCol.appendChild(endSpan);
+        card.appendChild(timeCol);
+
+        aiopsIncContainer.appendChild(card);
+      });
+    }
+
+    // Detected Anomaly Signals Table
+    const anomaliesBody = document.getElementById('aiops-anomalies-body');
+    clearElement(anomaliesBody);
+
+    if (!aiops.anomalies || aiops.anomalies.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 7;
+      td.className = 'loading-cell';
+      td.textContent = 'No statistical or threshold anomaly signals recorded.';
+      tr.appendChild(td);
+      anomaliesBody.appendChild(tr);
+    } else {
+      aiops.anomalies.slice(0, 30).forEach(a => {
+        const tr = document.createElement('tr');
+
+        const tdHost = document.createElement('td');
+        tdHost.className = 'mono-id';
+        tdHost.textContent = a.source_host;
+        tr.appendChild(tdHost);
+
+        const tdMetric = document.createElement('td');
+        const spanM = document.createElement('span');
+        spanM.className = 'mono-type';
+        spanM.textContent = a.metric_name;
+        tdMetric.appendChild(spanM);
+        tr.appendChild(tdMetric);
+
+        const tdObs = document.createElement('td');
+        tdObs.className = 'mono-id';
+        tdObs.style.fontWeight = '600';
+        tdObs.textContent = a.observed_value;
+        tr.appendChild(tdObs);
+
+        const tdBase = document.createElement('td');
+        tdBase.className = 'mono-id';
+        tdBase.textContent = a.baseline_or_threshold;
+        tr.appendChild(tdBase);
+
+        const tdSev = document.createElement('td');
+        const spanSev = document.createElement('span');
+        spanSev.className = 'badge';
+        if (a.severity === 'CRITICAL') spanSev.classList.add('badge-error');
+        else if (a.severity === 'HIGH') spanSev.classList.add('badge-error');
+        else spanSev.classList.add('badge-warning');
+        spanSev.textContent = a.severity;
+        tdSev.appendChild(spanSev);
+        tr.appendChild(tdSev);
+
+        const tdMethod = document.createElement('td');
+        const spanMethod = document.createElement('span');
+        spanMethod.className = 'badge badge-neutral';
+        spanMethod.textContent = a.detection_method;
+        tdMethod.appendChild(spanMethod);
+        tr.appendChild(tdMethod);
+
+        const tdExp = document.createElement('td');
+        tdExp.style.fontSize = '12px';
+        tdExp.textContent = a.explanation;
+        tr.appendChild(tdExp);
+
+        anomaliesBody.appendChild(tr);
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Section C: Transmissions Table (Safe DOM insertion)
+    // ─────────────────────────────────────────────────────────────
     const tbody = document.getElementById('events-body');
     clearElement(tbody);
 
@@ -1444,7 +1844,9 @@ async function loadTenantData() {
     document.getElementById('btn-prev').disabled = currentPage === 0;
     document.getElementById('btn-next').disabled = (currentPage + 1) >= totalPages;
 
+    // ─────────────────────────────────────────────────────────────
     // Section D: Rejections & Incidents (Safe DOM insertion)
+    // ─────────────────────────────────────────────────────────────
     const incContainer = document.getElementById('incidents-container');
     clearElement(incContainer);
 
