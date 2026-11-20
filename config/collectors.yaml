@@ -1,0 +1,5 @@
+collectors:
+  - collector_id: collector_01
+    tenant_id: hospital_01
+    public_key_path: keys/collector_01_public.pem
+    active: true

@@ -1,0 +1,182 @@
+{
+  "model_type": "LogisticRegressionBinaryClassifier",
+  "model_version": "1.0.0",
+  "feature_names": [
+    "cpu_usage",
+    "memory_usage",
+    "disk_usage",
+    "latency_ms",
+    "cpu_modified_zscore",
+    "memory_modified_zscore",
+    "disk_modified_zscore",
+    "latency_modified_zscore",
+    "cpu_change",
+    "memory_change",
+    "disk_change",
+    "latency_change",
+    "abnormal_metric_count",
+    "persistence_indicator"
+  ],
+  "classification_threshold": 0.5,
+  "intercept": -5.767512,
+  "weights": {
+    "cpu_usage": 0.907129,
+    "memory_usage": 1.334625,
+    "disk_usage": 0.264986,
+    "latency_ms": 2.737087,
+    "cpu_modified_zscore": 1.837162,
+    "memory_modified_zscore": 1.814095,
+    "disk_modified_zscore": 1.877855,
+    "latency_modified_zscore": 2.558823,
+    "cpu_change": 0.079669,
+    "memory_change": -0.030193,
+    "disk_change": 0.26225,
+    "latency_change": 0.571797,
+    "abnormal_metric_count": 2.397251,
+    "persistence_indicator": 2.387532
+  },
+  "standardization": {
+    "feature_names": [
+      "cpu_usage",
+      "memory_usage",
+      "disk_usage",
+      "latency_ms",
+      "cpu_modified_zscore",
+      "memory_modified_zscore",
+      "disk_modified_zscore",
+      "latency_modified_zscore",
+      "cpu_change",
+      "memory_change",
+      "disk_change",
+      "latency_change",
+      "abnormal_metric_count",
+      "persistence_indicator"
+    ],
+    "means": [
+      38.411603,
+      60.851508,
+      60.977016,
+      31.889063,
+      0.454525,
+      0.2653,
+      0.548036,
+      3.917069,
+      0.092905,
+      0.035857,
+      0.010143,
+      0.929032,
+      0.250794,
+      0.761905
+    ],
+    "stds": [
+      14.896858,
+      10.037286,
+      15.469427,
+      65.261938,
+      2.605342,
+      1.84019,
+      3.086894,
+      18.187837,
+      9.666095,
+      5.661038,
+      2.868358,
+      45.909097,
+      0.60519,
+      1.615843
+    ]
+  },
+  "training_configuration": {
+    "learning_rate": 0.08,
+    "iterations": 2000,
+    "l2_lambda": 0.005,
+    "momentum": 0.9,
+    "class_weight": "balanced",
+    "pos_weight": 5.1765
+  },
+  "training_metadata": {
+    "dataset_path": "data/datacat_telemetry.csv",
+    "dataset_total_samples": 900,
+    "split_counts": {
+      "train": {
+        "total": 630,
+        "anomalous": 102,
+        "normal": 528
+      },
+      "validation": {
+        "total": 135,
+        "anomalous": 35,
+        "normal": 100
+      },
+      "test": {
+        "total": 135,
+        "anomalous": 43,
+        "normal": 92
+      }
+    },
+    "evaluation_metrics": {
+      "train": {
+        "samples": 630,
+        "true_positives": 102,
+        "false_positives": 0,
+        "true_negatives": 528,
+        "false_negatives": 0,
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "confusion_matrix": {
+          "predicted_normal": {
+            "actual_normal": 528,
+            "actual_anomaly": 0
+          },
+          "predicted_anomaly": {
+            "actual_normal": 0,
+            "actual_anomaly": 102
+          }
+        }
+      },
+      "validation": {
+        "samples": 135,
+        "true_positives": 35,
+        "false_positives": 0,
+        "true_negatives": 100,
+        "false_negatives": 0,
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "confusion_matrix": {
+          "predicted_normal": {
+            "actual_normal": 100,
+            "actual_anomaly": 0
+          },
+          "predicted_anomaly": {
+            "actual_normal": 0,
+            "actual_anomaly": 35
+          }
+        }
+      },
+      "test": {
+        "samples": 135,
+        "true_positives": 36,
+        "false_positives": 0,
+        "true_negatives": 92,
+        "false_negatives": 7,
+        "accuracy": 0.9481,
+        "precision": 1.0,
+        "recall": 0.8372,
+        "f1_score": 0.9114,
+        "confusion_matrix": {
+          "predicted_normal": {
+            "actual_normal": 92,
+            "actual_anomaly": 7
+          },
+          "predicted_anomaly": {
+            "actual_normal": 0,
+            "actual_anomaly": 36
+          }
+        }
+      }
+    }
+  }
+}

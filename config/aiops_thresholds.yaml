@@ -1,0 +1,129 @@
+# ============================================================
+# DATACAT AIOps Statistical Detection Engine - Threshold Config
+# ============================================================
+# All values are configurable without code changes.
+# Reload requires application restart.
+
+statistical_detection:
+
+  # Number of verified historical samples required before the
+  # dynamic MAD/Modified Z-score baseline becomes active.
+  # Below this count the engine falls back to static thresholds.
+  min_samples_for_baseline: 10
+
+  # Maximum number of past observations per server+metric to
+  # include in the rolling window. Only observations BEFORE the
+  # current event are used (current is never included in its own baseline).
+  rolling_window_size: 30
+
+  # Modified Z-score screening threshold (Iglewicz & Hoaglin 1993).
+  # |modified_z| > this value triggers anomaly classification.
+  modified_zscore_threshold: 3.5
+
+  # Critical absolute threshold override.
+  # Even if modified_z is below threshold, values above these
+  # absolute limits are still escalated immediately.
+  critical_absolute_thresholds:
+    cpu_usage: 95.0        # %
+    memory_usage: 95.0     # %
+    disk_usage: 97.0       # %
+    latency_ms: 1000.0     # ms
+
+  # Minimum MAD scale (epsilon) to prevent division by zero when
+  # all historical values are identical (zero MAD edge case).
+  # Applied per metric before Modified Z-score calculation.
+  min_mad_scale:
+    cpu_usage: 1.0        # % - at least 1 percentage point spread assumed
+    memory_usage: 1.0     # %
+    disk_usage: 0.5       # %
+    latency_ms: 2.0       # ms
+
+  # Direction of anomaly detection.
+  # "high_only"  - alert only when value is ABOVE baseline (resource saturation focus)
+  # "both"       - alert on unusually high OR low values
+  direction:
+    cpu_usage: high_only
+    memory_usage: high_only
+    disk_usage: high_only
+    latency_ms: high_only
+
+  # Static fallback thresholds used when history is insufficient.
+  # These are the operational "safe upper limits" for each metric.
+  fallback_thresholds:
+    cpu_usage: 85.0        # %
+    memory_usage: 85.0     # %
+    disk_usage: 90.0       # %
+    latency_ms: 150.0      # ms
+
+  # Severity classification based on Modified Z-score bands.
+  # Applied when dynamic baseline is active.
+  severity_bands:
+    medium_z: 3.5          # |modified_z| >= this -> MEDIUM
+    high_z: 6.0            # |modified_z| >= this -> HIGH
+    critical_z: 10.0       # |modified_z| >= this -> CRITICAL
+
+  # Severity classification for fallback threshold breaches.
+  # Excess = observed_value - fallback_threshold
+  fallback_severity_bands:
+    medium_excess: 0.0     # any breach -> at least MEDIUM
+    high_excess: 5.0       # +5 above threshold -> HIGH
+    critical_excess: 15.0  # +15 above threshold -> CRITICAL
+
+persistence:
+  # Number of consecutive rolling samples that must each individually
+  # exceed the modified_zscore_threshold before PERSISTENT severity is escalated.
+  # Set to 1 to disable persistence promotion (single-event alerting).
+  consecutive_anomaly_window: 3
+
+  # Persistence promotion: if a metric was anomalous in this many
+  # of the last N observations, escalate severity to the next level.
+  persistence_lookback_count: 5    # Look at the last N observations
+  persistence_trigger_count: 3     # Anomalous in >= this many -> escalate
+
+  # Persistence count threshold that immediately overrides severity to CRITICAL
+  # regardless of the modified Z-score.
+  persistence_critical_override: 5
+
+baseline_protection:
+  # Anomaly contamination guard:
+  # If an observation is classified as anomalous, it is tagged and
+  # excluded from future baseline calculations for the same server+metric.
+  # Set to true (recommended) to prevent anomalies from skewing the median.
+  exclude_anomalies_from_baseline: true
+
+  # Maximum fraction of the rolling window that may be anomalous before
+  # the baseline is considered unreliable and falls back to static thresholds.
+  # E.g. 0.5 means: if >50% of history is anomalous, use fallback.
+  max_anomaly_contamination_ratio: 0.5
+
+alert_suppression:
+  # Minimum seconds between repeated anomaly alerts for the same
+  # server+metric combination. Prevents alert flooding.
+  suppression_window_seconds: 120
+
+incident_correlation:
+  # Seconds within which concurrent anomalies on the same server
+  # are grouped into a single correlated incident.
+  correlation_window_seconds: 300
+
+decision_fusion:
+  # Threshold above which ML probability is deemed "high"
+  high_prob_threshold: 0.50
+  # Threshold below which ML probability is deemed "low"
+  low_prob_threshold: 0.20
+  # Whether persistent candidate anomalies escalate to full anomaly
+  escalate_on_persistence: true
+  persistence_escalate_count: 3
+
+health_classification:
+  # Inactivity threshold in seconds beyond which server is deemed POOR / STALE
+  stale_threshold_seconds: 180
+  # Operational fallback limits for severity mapping
+  cpu_fair: 75.0
+  cpu_poor: 90.0
+  memory_fair: 75.0
+  memory_poor: 90.0
+  disk_fair: 85.0
+  disk_poor: 95.0
+  latency_fair: 100.0
+  latency_poor: 200.0

@@ -1,0 +1,28 @@
+# __pycache__
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Database
+*.db
+*.sqlite3
+
+# Testing
+.pytest_cache/
+.pytest_temp/
+.coverage
+htmlcov/
+
+# Test run artefacts (temporary per-test isolated DB directories)
+.test_*/
+.test_unified_aiops_data/
+.test_qa_validation_data/
+
+# Logs
+*.log
