@@ -1,343 +1,497 @@
-"""Deterministic integration and functional tests for DATACAT AIOps Intelligence Engine."""
-import base64
-import os
-import shutil
-import sqlite3
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+"""
+Tests for DATACAT AIOps Intelligence Engine.
+Tests metric extraction, threshold anomalies, MAD historical baselines,
+incident correlation, explainable recommendations, and API authorization.
+"""
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+import aiosqlite
 import pytest
-from httpx import ASGITransport, AsyncClient
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.hazmat.primitives import serialization
-
-import app.config as config
-from app.core.aiops import AIOpsEngine, MIN_SAMPLES_FOR_BASELINE, FALLBACK_THRESHOLDS
-from app.core.crypto import canonical_receipt_bytes, compute_payload_hash
-from app.core.registry import registry
-from app.db.database import INIT_SQL, get_db_connection
-from app.main import app
-
-TEST_DATA_DIR = config.BASE_DIR / ".test_aiops_data"
-TEST_KEY = ed25519.Ed25519PrivateKey.generate()
-TEST_PUB_KEY = TEST_KEY.public_key()
+from backend.aiops.correlator import correlate_anomalies
+from backend.aiops.detector import AnomalySignal, evaluate_metric
+from backend.aiops.freshness import (
+    calculate_age_seconds,
+    determine_health_status,
+    evaluate_freshness,
+)
+from backend.aiops.metrics import extract_metrics
+from backend.aiops.recommendations import generate_recommendation
+from backend.config import DB_PATH
+from backend.database import register_tenant_token
+from tests.conftest import build_valid_event
 
 
-@pytest.fixture(autouse=True)
-def setup_aiops_test_environment(monkeypatch):
-    """Configures isolated test environment for AIOps engine tests."""
-    if TEST_DATA_DIR.exists():
-        shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
-    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+# ── Metric Extraction Tests ──────────────────────────────────────────────
 
-    test_db = TEST_DATA_DIR / "test_datacat_aiops.db"
-    test_yaml = TEST_DATA_DIR / "test_collectors_aiops.yaml"
-    test_pub_file = TEST_DATA_DIR / "test_collector_pub.pem"
-
-    pub_bytes = TEST_PUB_KEY.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    test_pub_file.write_bytes(pub_bytes)
-
-    test_yaml.write_text(f"""
-collectors:
-  - collector_id: aiops_collector_1
-    tenant_id: hospital_01
-    public_key_path: {str(test_pub_file).replace('\\', '/')}
-    active: true
-""", encoding="utf-8")
-
-    # Initialize SQLite schema
-    con = sqlite3.connect(test_db)
-    con.executescript(INIT_SQL)
-    now_utc = datetime.now(timezone.utc).isoformat()
-    con.execute(
-        "INSERT INTO collectors VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("aiops_collector_1", "hospital_01", str(test_pub_file), "ACTIVE", 0, now_utc, now_utc)
-    )
-    con.commit()
-    con.close()
-
-    monkeypatch.setattr(config, "DB_PATH", test_db)
-    monkeypatch.setattr(config, "COLLECTORS_CONFIG_PATH", test_yaml)
-    monkeypatch.setattr(registry, "config_path", test_yaml)
-    registry.reload()
-
-    yield
-
-    if TEST_DATA_DIR.exists():
-        shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
-
-
-def test_baseline_engine_fallback_when_insufficient_samples():
-    """Verifies that with < MIN_SAMPLES_FOR_BASELINE, dynamic baseline is inactive and fallback is used."""
-    past_cpu = [40.0, 42.0, 41.5]  # 3 samples < 5
-    baseline = AIOpsEngine.calculate_baseline("cpu_usage", past_cpu)
-
-    assert baseline["dynamic_baseline_active"] is False
-    assert baseline["sample_count"] == 3
-    assert baseline["expected_baseline"] == FALLBACK_THRESHOLDS["cpu_usage"]
-    assert baseline["baseline_type"] == "configurable_fallback_threshold"
-
-
-def test_baseline_engine_statistical_calculation_with_sufficient_samples():
-    """Verifies that with >= MIN_SAMPLES_FOR_BASELINE, rolling mean, median and stdev are computed."""
-    past_cpu = [40.0, 42.0, 44.0, 40.0, 44.0, 42.0]  # 6 samples >= 5
-    baseline = AIOpsEngine.calculate_baseline("cpu_usage", past_cpu)
-
-    assert baseline["dynamic_baseline_active"] is True
-    assert baseline["sample_count"] == 6
-    assert baseline["mean"] == 42.0
-    assert baseline["median"] == 42.0
-    assert baseline["stdev"] > 0.0
-    assert baseline["baseline_type"] == "statistical_rolling_baseline"
-
-
-@pytest.mark.asyncio
-async def test_anomaly_detection_with_fallback_threshold():
-    """Tests anomaly detection when history is insufficient and fallback threshold triggers."""
-    db = await get_db_connection()
-    try:
-        now_utc = datetime.now(timezone.utc).isoformat()
-        # Event with 88.0% CPU (exceeding 85.0% fallback)
-        test_event = {
-            "event_id": "evt_aiops_1",
-            "tenant_id": "hospital_01",
-            "server_id": "srv_icu_fallback",
-            "timestamp_utc": now_utc,
-            "metrics": {
-                "cpu_usage": 88.0,
-                "memory_usage": 40.0,
-                "disk_usage": 50.0,
-                "latency_ms": 15.0,
-            },
-            "policy_version": "v1.0",
-        }
-
-        anomalies = await AIOpsEngine.analyze_event(db, test_event)
-        assert len(anomalies) == 1
-        anom = anomalies[0]
-
-        # Verify all required fields
-        assert "anomaly_id" in anom
-        assert anom["tenant_id"] == "hospital_01"
-        assert anom["server_id"] == "srv_icu_fallback"
-        assert anom["metric_name"] == "cpu_usage"
-        assert anom["observed_value"] == 88.0
-        assert anom["expected_baseline"] == 85.0
-        assert anom["severity"] in ["MEDIUM", "HIGH", "CRITICAL"]
-        assert "detection_timestamp" in anom
-        assert "explanation" in anom
-        assert "fallback threshold" in anom["explanation"]
-    finally:
-        await db.close()
-
-
-@pytest.mark.asyncio
-async def test_dynamic_zscore_anomaly_and_anti_spam():
-    """Tests dynamic Z-score anomaly detection after historical baseline is established and checks anti-spam."""
-    db = await get_db_connection()
-    try:
-        now = datetime.now(timezone.utc)
-        server_id = "srv_cardiology_01"
-
-        # Seed 6 baseline events around 30% CPU
-        for i in range(6):
-            ts = (now - timedelta(minutes=10 - i)).isoformat()
-            await db.execute(
-                """
-                INSERT INTO telemetry_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    f"evt_hist_{i}", "hospital_01", server_id, ts,
-                    '{"cpu_usage": 30.0, "memory_usage": 35.0, "disk_usage": 40.0, "latency_ms": 10.0}',
-                    "aiops_collector_1", i + 1, "v1.0", "hash", ts
-                )
-            )
-        await db.commit()
-
-        # Now send a spike to 78.0% CPU (significantly above 30.0% baseline mean)
-        spike_event = {
-            "event_id": "evt_spike_1",
-            "tenant_id": "hospital_01",
-            "server_id": server_id,
-            "timestamp_utc": now.isoformat(),
-            "metrics": {
-                "cpu_usage": 78.0,
-                "memory_usage": 35.0,
-                "disk_usage": 40.0,
-                "latency_ms": 10.0,
-            },
-            "policy_version": "v1.0",
-        }
-
-        anomalies = await AIOpsEngine.analyze_event(db, spike_event)
-        assert len(anomalies) == 1
-        anom = anomalies[0]
-        assert anom["metric_name"] == "cpu_usage"
-        assert anom["baseline_type"] == "statistical_zscore"
-        assert "standard deviations above" in anom["explanation"]
-
-        # Anti-spam check: sending an identical spike immediately afterwards within 120s must be suppressed
-        second_spike = dict(spike_event, event_id="evt_spike_2")
-        suppressed_anomalies = await AIOpsEngine.analyze_event(db, second_spike)
-        # Should be suppressed (0 new anomalies created)
-        assert len(suppressed_anomalies) == 0
-    finally:
-        await db.close()
-
-
-@pytest.mark.asyncio
-async def test_event_correlation_into_single_incident():
-    """Verifies that concurrent CPU, Memory, and Latency anomalies are correlated into ONE incident."""
-    db = await get_db_connection()
-    try:
-        now_utc = datetime.now(timezone.utc).isoformat()
-        server_id = "srv_er_saturation"
-
-        # Multi-signal spike event (CPU 92%, Memory 89%, Latency 220ms)
-        multi_spike = {
-            "event_id": "evt_multi_1",
-            "tenant_id": "hospital_01",
-            "server_id": server_id,
-            "timestamp_utc": now_utc,
-            "metrics": {
-                "cpu_usage": 92.0,     # Exceeds fallback 85%
-                "memory_usage": 89.0,  # Exceeds fallback 85%
-                "disk_usage": 40.0,
-                "latency_ms": 220.0,   # Exceeds fallback 150ms
-            },
-            "policy_version": "v1.0",
-        }
-
-        anomalies = await AIOpsEngine.analyze_event(db, multi_spike)
-        assert len(anomalies) == 3  # CPU, Memory, Latency anomalies detected
-
-        # Verify ONE correlated incident was stored in incidents table
-        async with db.execute("SELECT * FROM incidents WHERE server_id = ?;", (server_id,)) as cur:
-            incidents = await cur.fetchall()
-            assert len(incidents) == 1
-            inc = dict(incidents[0])
-            assert inc["severity"] == "CRITICAL"
-            assert "Full-Stack Server Degradation" in inc["title"]
-            assert inc["correlated_anomalies_count"] == 3
-
-            # Verify recommendations are grounded in metrics
-            import json
-            rec = json.loads(inc["recommendations"])
-            assert rec["affected_server"] == server_id
-            assert len(rec["investigation_steps"]) >= 2
-            assert len(rec["contributing_metrics"]) == 3
-    finally:
-        await db.close()
-
-
-@pytest.mark.asyncio
-async def test_aiops_api_endpoints():
-    """Tests the new AIOps endpoints: /anomalies, /incidents, /incidents/{id}, /recommendations."""
-    # Seed an anomaly and incident into the test database
-    db = await get_db_connection()
-    try:
-        now_utc = datetime.now(timezone.utc).isoformat()
-        await db.execute(
-            """
-            INSERT INTO anomalies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN');
-            """,
-            ("anom_test_1", "hospital_01", "srv_api_01", "cpu_usage", 95.0, 40.0, "CRITICAL", now_utc, "High CPU", "evt_1")
-        )
-        await db.execute(
-            """
-            INSERT INTO incidents VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, 1, ?, ?);
-            """,
-            (
-                "inc_test_1", "hospital_01", "srv_api_01", "CPU Saturation Detected", "CRITICAL",
-                now_utc, '["cpu_usage"]', "Sustained high load",
-                '{"what_happened": "High CPU", "affected_server": "srv_api_01", "investigation_steps": ["Check processes"]}',
-                now_utc, now_utc
-            )
-        )
-        await db.commit()
-    finally:
-        await db.close()
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. GET /api/v1/anomalies
-        res1 = await client.get("/api/v1/anomalies")
-        assert res1.status_code == 200
-        data1 = res1.json()
-        assert data1["count"] >= 1
-        assert data1["anomalies"][0]["server_id"] == "srv_api_01"
-
-        # 2. GET /api/v1/incidents
-        res2 = await client.get("/api/v1/incidents")
-        assert res2.status_code == 200
-        data2 = res2.json()
-        assert data2["count"] >= 1
-        assert data2["incidents"][0]["incident_id"] == "inc_test_1"
-
-        # 3. GET /api/v1/incidents/{incident_id}
-        res3 = await client.get("/api/v1/incidents/inc_test_1")
-        assert res3.status_code == 200
-        data3 = res3.json()
-        assert data3["title"] == "CPU Saturation Detected"
-        assert data3["severity"] == "CRITICAL"
-
-        # 4. GET /api/v1/recommendations
-        res4 = await client.get("/api/v1/recommendations")
-        assert res4.status_code == 200
-        data4 = res4.json()
-        assert data4["count"] >= 1
-        assert data4["recommendations"][0]["affected_server"] == "srv_api_01"
-
-
-@pytest.mark.asyncio
-async def test_end_to_end_ingestion_triggers_aiops():
-    """Verifies that submitting a verified event via POST /api/v1/ingest automatically triggers AIOps."""
-    # Create signed event with high CPU
-    now_utc = datetime.now(timezone.utc).isoformat()
-    event = {
-        "event_id": "evt_aiops_e2e_1",
-        "tenant_id": "hospital_01",
-        "server_id": "srv_e2e_icu",
-        "timestamp_utc": now_utc,
+def test_metric_extraction_aliases_and_nested():
+    """Verify alias resolution, nested metrics object, and canonical names."""
+    payload = {
+        "source": "collector-agent",
+        "cpu_pct": 45.2,
         "metrics": {
-            "cpu_usage": 96.0,  # Exceeds fallback
-            "memory_usage": 45.0,
-            "disk_usage": 50.0,
-            "latency_ms": 12.0,
+            "ram_pct": 72.8,
+            "response_time_ms": 120.5,
+            "disk_percent": 88.0,
+            "packet_loss": 1.2,
+            "failed_logins": 3,
         },
-        "policy_version": "v1.0",
     }
-    payload_hash = compute_payload_hash(event)
-    receipt = {
-        "event_id": "evt_aiops_e2e_1",
-        "tenant_id": "hospital_01",
-        "payload_hash": payload_hash,
-        "collector_id": "aiops_collector_1",
-        "sequence_number": 100,
-        "policy_version": "v1.0",
-        "algorithm": "Ed25519",
+    extracted = extract_metrics(payload)
+    assert extracted["cpu_usage"] == 45.2
+    assert extracted["memory_usage"] == 72.8
+    assert extracted["network_latency_ms"] == 120.5
+    assert extracted["disk_usage"] == 88.0
+    assert extracted["packet_loss_pct"] == 1.2
+    assert extracted["failed_login_count"] == 3.0
+
+
+def test_metric_extraction_rejects_invalid_values():
+    """Booleans, NaNs, infinities, out-of-bound percentages, and mem_mb must be rejected."""
+    payload = {
+        "cpu_usage": True,  # Boolean must be rejected
+        "memory_usage": float("nan"),  # NaN rejected
+        "disk_usage": 150.0,  # Out of 0-100 percentage range rejected
+        "mem_mb": 8192,  # Memory in MB must not be mistaken for percentage
+        "network_latency_ms": -25.0,  # Negative latency rejected
+        "failed_login_count": "three",  # Non-numeric string rejected
+        "packet_loss_pct": -5.0,  # Negative percentage rejected
     }
-    sig_bytes = TEST_KEY.sign(canonical_receipt_bytes(receipt))
-    receipt["signature"] = base64.b64encode(sig_bytes).decode("utf-8")
+    extracted = extract_metrics(payload)
+    assert "cpu_usage" not in extracted
+    assert "memory_usage" not in extracted
+    assert "disk_usage" not in extracted
+    assert "network_latency_ms" not in extracted
+    assert "failed_login_count" not in extracted
+    assert "packet_loss_pct" not in extracted
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Ingest
-        res_ingest = await client.post("/api/v1/ingest", json={"event": event, "receipt": receipt})
-        assert res_ingest.status_code == 201
 
-        # Check that an anomaly was automatically created
-        res_anom = await client.get("/api/v1/anomalies?server_id=srv_e2e_icu")
-        assert res_anom.status_code == 200
-        anomalies = res_anom.json()["anomalies"]
-        assert len(anomalies) == 1
-        assert anomalies[0]["observed_value"] == 96.0
+# ── Anomaly Detection Tests ──────────────────────────────────────────────
 
-        # Check that a correlated incident was generated
-        res_inc = await client.get("/api/v1/incidents?server_id=srv_e2e_icu")
-        assert res_inc.status_code == 200
-        incidents = res_inc.json()["incidents"]
-        assert len(incidents) == 1
-        assert "CPU" in incidents[0]["title"]
+def test_normal_metrics_do_not_trigger_anomalies():
+    """Values well within thresholds and normal baselines produce no anomaly."""
+    history = [30.0, 32.0, 29.0, 31.0, 30.5, 33.0, 28.5, 31.0]
+    signal = evaluate_metric("evt-1", "host-a", "cpu_usage", 32.0, history, "2026-11-20T12:00:00Z")
+    assert signal is None
+
+
+def test_cpu_high_threshold_detection():
+    """CPU usage >= 90% triggers HIGH severity."""
+    history = [40.0, 42.0, 45.0, 41.0, 43.0, 40.0, 44.0, 42.0]
+    signal = evaluate_metric("evt-1", "host-a", "cpu_usage", 92.0, history, "2026-11-20T12:00:00Z")
+    assert signal is not None
+    assert signal.severity == "HIGH"
+    assert signal.metric_name == "cpu_usage"
+    assert "high warning threshold" in signal.explanation.lower()
+
+
+def test_memory_threshold_detection():
+    """Memory usage >= 90% triggers HIGH severity."""
+    history = [50.0] * 8
+    signal = evaluate_metric("evt-2", "host-a", "memory_usage", 94.0, history, "2026-11-20T12:00:00Z")
+    assert signal is not None
+    assert signal.severity == "HIGH"
+    assert signal.metric_name == "memory_usage"
+
+
+def test_critical_severity_detection():
+    """Values >= critical thresholds trigger CRITICAL severity."""
+    history = [60.0] * 8
+    # CPU critical threshold is 98%
+    signal = evaluate_metric("evt-3", "host-a", "cpu_usage", 99.1, history, "2026-11-20T12:00:00Z")
+    assert signal is not None
+    assert signal.severity == "CRITICAL"
+
+    # Latency critical threshold is 1000 ms
+    lat_signal = evaluate_metric("evt-4", "host-a", "network_latency_ms", 1250.0, [50.0] * 8, "2026-11-20T12:00:00Z")
+    assert lat_signal is not None
+    assert lat_signal.severity == "CRITICAL"
+
+
+def test_historical_mad_baseline_detection_after_eight_samples():
+    """
+    If a host historically runs CPU at 20-25%, a sudden spike to 70% must be flagged
+    as a statistical MAD anomaly (MEDIUM severity) even if it hasn't crossed the static 90% threshold.
+    """
+    history = [20.0, 22.0, 21.0, 23.0, 20.5, 21.5, 22.5, 21.0]
+    signal = evaluate_metric("evt-5", "host-a", "cpu_usage", 70.0, history, "2026-11-20T12:00:00Z")
+    assert signal is not None
+    assert signal.severity == "MEDIUM"
+    assert signal.detection_method == "statistical_mad"
+    assert "deviated significantly" in signal.explanation.lower()
+
+
+def test_fewer_than_eight_samples_skips_mad_detection():
+    """Historical baseline requires at least 8 samples; below 8 samples it doesn't false-alarm on baseline."""
+    history = [20.0, 21.0, 22.0]
+    signal = evaluate_metric("evt-6", "host-a", "cpu_usage", 70.0, history, "2026-11-20T12:00:00Z")
+    assert signal is None
+
+
+# ── Correlation & Recommendations Tests ──────────────────────────────────
+
+def test_multiple_signals_from_one_host_correlated():
+    """Multiple anomalies on the same host within 5 minutes form one correlated incident."""
+    sig1 = AnomalySignal("evt-1", "server-01", "cpu_usage", 95.0, 90.0, "HIGH", "static", "high cpu", "2026-11-20T14:00:00Z")
+    sig2 = AnomalySignal("evt-2", "server-01", "memory_usage", 94.0, 90.0, "HIGH", "static", "high ram", "2026-11-20T14:02:00Z")
+    sig3 = AnomalySignal("evt-3", "server-01", "network_latency_ms", 450.0, 300.0, "HIGH", "static", "high latency", "2026-11-20T14:03:00Z")
+
+    incidents = correlate_anomalies([sig1, sig2, sig3])
+    assert len(incidents) == 1
+    inc = incidents[0]
+    assert inc["source_host"] == "server-01"
+    assert inc["signal_count"] == 3
+    assert set(inc["unique_event_ids"]) == {"evt-1", "evt-2", "evt-3"}
+    assert "Resource Exhaustion" in inc["title"]
+
+
+def test_signals_from_different_hosts_are_not_correlated():
+    """Signals from server-01 and server-02 must never be grouped into the same incident."""
+    sig1 = AnomalySignal("evt-1", "server-01", "cpu_usage", 96.0, 90.0, "HIGH", "static", "high cpu", "2026-11-20T14:00:00Z")
+    sig2 = AnomalySignal("evt-2", "server-02", "cpu_usage", 95.0, 90.0, "HIGH", "static", "high cpu", "2026-11-20T14:01:00Z")
+
+    incidents = correlate_anomalies([sig1, sig2])
+    assert len(incidents) == 2
+    hosts = {inc["source_host"] for inc in incidents}
+    assert hosts == {"server-01", "server-02"}
+
+
+def test_recommendations_explain_detected_metrics():
+    """Combined CPU, Memory, and Latency anomalies produce explainable guidance."""
+    rec = generate_recommendation(["cpu_usage", "memory_usage", "network_latency_ms"])
+    assert "resource exhaustion" in rec.lower()
+    assert "processes" in rec.lower()
+
+    rec_single = generate_recommendation(["failed_login_count"])
+    assert "authentication failure" in rec_single.lower()
+
+
+# ── AIOps API Endpoint Tests ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_aiops_overview_empty_tenant_returns_no_data(client, ed25519_keypair):
+    """A tenant with no accepted events returns health_status='no_data'."""
+    new_tenant = str(uuid.uuid4())
+    token = "empty-tenant-token"
+    await register_tenant_token(new_tenant, token)
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={new_tenant}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["health_status"] == "no_data"
+    assert data["hosts_monitored"] == 0
+    assert data["events_analyzed"] == 0
+    assert data["incidents"] == []
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_requires_auth(client, tenant_id):
+    """Calling /api/v1/aiops/overview without token returns 401."""
+    resp = await client.get(f"/api/v1/aiops/overview?tenant_id={tenant_id}")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_tenant_isolation_forbidden(client, tenant_id, tenant_token):
+    """Token for Tenant A cannot access Tenant B's AIOps overview."""
+    other_tenant = str(uuid.uuid4())
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={other_tenant}",
+        headers={"Authorization": f"Bearer {tenant_token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_end_to_end_computation(client, ed25519_keypair, tenant_id, tenant_token):
+    """
+    Ingest real telemetry events with an anomaly, verify AIOps endpoint computes
+    actual intelligence, detects the anomaly, and forms a correlated incident.
+    """
+    private_key, pub_b64 = ed25519_keypair
+    test_host = f"prod-worker-{uuid.uuid4().hex[:6]}"
+
+    # Send 1 normal event
+    e1 = build_valid_event(
+        private_key, pub_b64, tenant_id,
+        source_host=test_host,
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 35.0, "ram_pct": 50.0},
+    )
+    r1 = await client.post("/api/v1/ingest", json=e1, headers={"X-Tenant-ID": tenant_id})
+    assert r1.status_code == 202
+
+    # Send 1 critical anomaly event (CPU 99%, Latency 1100ms)
+    e2 = build_valid_event(
+        private_key, pub_b64, tenant_id,
+        source_host=test_host,
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 99.0, "latency_ms": 1100.0},
+    )
+    r2 = await client.post("/api/v1/ingest", json=e2, headers={"X-Tenant-ID": tenant_id})
+    assert r2.status_code == 202
+
+    # Call AIOps overview
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={tenant_id}",
+        headers={"Authorization": f"Bearer {tenant_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["health_status"] == "critical"
+    assert data["hosts_monitored"] >= 1
+    assert data["events_analyzed"] >= 2
+    assert data["anomaly_count"] >= 2
+    assert data["correlated_incident_count"] >= 1
+
+    # Check incident structure
+    inc = data["incidents"][0]
+    assert inc["source_host"] == test_host
+    assert inc["severity"] == "CRITICAL"
+    assert len(inc["contributing_signals"]) >= 2
+    assert len(inc["suggested_recommendation"]) > 10
+
+
+# ── Telemetry Freshness Tests ────────────────────────────────────────────
+
+def test_freshness_evaluation_unit_thresholds():
+    """Verify fresh (<2m), stale (2-10m), very stale (>10m), and no_data categories."""
+    now = datetime(2026, 11, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Empty / None / invalid timestamp
+    assert evaluate_freshness(None, now=now) == ("no_data", None)
+    assert evaluate_freshness("", now=now) == ("no_data", None)
+    assert evaluate_freshness("invalid-iso-string", now=now) == ("no_data", None)
+
+    # Fresh: < 120s (e.g. 30s ago, 119s ago)
+    t_30s = (now - timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_30s, now=now)
+    assert cat == "fresh"
+    assert round(age) == 30
+
+    t_119s = (now - timedelta(seconds=119)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_119s, now=now)
+    assert cat == "fresh"
+    assert round(age) == 119
+
+    # Stale: 2m to 10m (120s to 600s)
+    t_120s = (now - timedelta(seconds=120)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_120s, now=now)
+    assert cat == "stale"
+    assert round(age) == 120
+
+    t_5m = (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_5m, now=now)
+    assert cat == "stale"
+    assert round(age) == 300
+
+    t_10m = (now - timedelta(seconds=600)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_10m, now=now)
+    assert cat == "stale"
+    assert round(age) == 600
+
+    # Very Stale: > 10m (> 600s)
+    t_11m = (now - timedelta(minutes=11)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_11m, now=now)
+    assert cat == "very_stale"
+    assert round(age) == 660
+
+    # 57 minutes ago (the exact bug scenario)
+    t_57m = (now - timedelta(minutes=57)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_57m, now=now)
+    assert cat == "very_stale"
+    assert round(age) == 3420
+
+
+def test_determine_health_status_unit_matrix():
+    """Verify composite health distinguishing metric health from freshness."""
+    # When metrics are healthy:
+    assert determine_health_status("healthy", "fresh") == "healthy"
+    assert determine_health_status("healthy", "stale") == "stale"
+    assert determine_health_status("healthy", "very_stale") == "very_stale"
+
+    # When metrics are degraded or critical, alarms take precedence:
+    assert determine_health_status("degraded", "fresh") == "degraded"
+    assert determine_health_status("degraded", "stale") == "degraded"
+    assert determine_health_status("critical", "fresh") == "critical"
+    assert determine_health_status("critical", "very_stale") == "critical"
+
+    # When either is no_data:
+    assert determine_health_status("no_data", "fresh") == "no_data"
+    assert determine_health_status("healthy", "no_data") == "no_data"
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_empty_telemetry_freshness_fields(client):
+    """Empty tenant exposes no_data freshness and None age."""
+    new_tenant = str(uuid.uuid4())
+    token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(new_tenant, token)
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={new_tenant}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["health_status"] == "no_data"
+    assert data["metric_health"] == "no_data"
+    assert data["telemetry_freshness"] == "no_data"
+    assert data["last_seen_timestamp"] is None
+    assert data["last_seen_age_seconds"] is None
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_telemetry_fresh_reports_healthy(client, ed25519_keypair):
+    """Normal telemetry ingested moments ago evaluates as fresh and healthy."""
+    private_key, pub_b64 = ed25519_keypair
+    isolated_tenant = str(uuid.uuid4())
+    isolated_token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(isolated_tenant, isolated_token)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO trusted_keys (tenant_id, public_key_b64, collector_name) VALUES (?, ?, ?)",
+            (isolated_tenant, pub_b64, "collector-fresh-test"),
+        )
+        await db.commit()
+
+    test_host = f"fresh-worker-{uuid.uuid4().hex[:6]}"
+
+    event = build_valid_event(
+        private_key, pub_b64, isolated_tenant,
+        source_host=test_host,
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 25.0, "ram_pct": 40.0},
+    )
+    r = await client.post("/api/v1/ingest", json=event, headers={"X-Tenant-ID": isolated_tenant})
+    assert r.status_code == 202
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={isolated_tenant}",
+        headers={"Authorization": f"Bearer {isolated_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["metric_health"] == "healthy"
+    assert data["telemetry_freshness"] == "fresh"
+    assert data["health_status"] == "healthy"
+    assert data["last_seen_age_seconds"] is not None
+    assert data["last_seen_age_seconds"] < 120.0
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_telemetry_stale_reports_stale_not_healthy(client, ed25519_keypair):
+    """
+    Telemetry 5 minutes old with zero anomalies must report stale, NOT healthy.
+    Distinguishes metric_health ('healthy') from telemetry_freshness ('stale').
+    """
+    private_key, pub_b64 = ed25519_keypair
+    isolated_tenant = str(uuid.uuid4())
+    isolated_token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(isolated_tenant, isolated_token)
+
+    # Register trusted key for this tenant
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO trusted_keys (tenant_id, public_key_b64, collector_name) VALUES (?, ?, ?)",
+            (isolated_tenant, pub_b64, "collector-stale-test"),
+        )
+        await db.commit()
+
+    event = build_valid_event(
+        private_key, pub_b64, isolated_tenant,
+        source_host="stale-host-01",
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 25.0, "ram_pct": 35.0},
+    )
+    r = await client.post("/api/v1/ingest", json=event, headers={"X-Tenant-ID": isolated_tenant})
+    assert r.status_code == 202
+
+    # Simulate 5 minutes elapsed on ingested_at
+    stale_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE events SET ingested_at = ? WHERE tenant_id = ?",
+            (stale_ts, isolated_tenant),
+        )
+        await db.commit()
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={isolated_tenant}",
+        headers={"Authorization": f"Bearer {isolated_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["metric_health"] == "healthy"
+    assert data["telemetry_freshness"] == "stale"
+    # Crucial requirement: Must NOT report healthy!
+    assert data["health_status"] == "stale"
+    assert data["health_status"] != "healthy"
+    assert data["last_seen_age_seconds"] is not None
+    assert 250.0 <= data["last_seen_age_seconds"] <= 350.0
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_telemetry_fifty_seven_minutes_old_reports_very_stale(client, ed25519_keypair):
+    """
+    Direct reproduction of the reported issue:
+    Telemetry event is ~57 minutes old with zero anomalies.
+    Platform must NOT report HEALTHY; it must report very_stale.
+    """
+    private_key, pub_b64 = ed25519_keypair
+    isolated_tenant = str(uuid.uuid4())
+    isolated_token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(isolated_tenant, isolated_token)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO trusted_keys (tenant_id, public_key_b64, collector_name) VALUES (?, ?, ?)",
+            (isolated_tenant, pub_b64, "collector-57m-test"),
+        )
+        await db.commit()
+
+    event = build_valid_event(
+        private_key, pub_b64, isolated_tenant,
+        source_host="silent-host-01",
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 20.0, "ram_pct": 30.0},
+    )
+    r = await client.post("/api/v1/ingest", json=event, headers={"X-Tenant-ID": isolated_tenant})
+    assert r.status_code == 202
+
+    # Simulate 57 minutes elapsed on ingested_at
+    fifty_seven_mins_ago = (datetime.now(timezone.utc) - timedelta(minutes=57)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE events SET ingested_at = ? WHERE tenant_id = ?",
+            (fifty_seven_mins_ago, isolated_tenant),
+        )
+        await db.commit()
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={isolated_tenant}",
+        headers={"Authorization": f"Bearer {isolated_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["metric_health"] == "healthy"
+    assert data["telemetry_freshness"] == "very_stale"
+    # Crucial requirement: Must NOT report healthy!
+    assert data["health_status"] == "very_stale"
+    assert data["health_status"] != "healthy"
+    assert data["last_seen_age_seconds"] is not None
+    assert data["last_seen_age_seconds"] > 3000.0  # ~3420 seconds
+
+    # Check that host metrics also carry freshness
+    host_metric = data["latest_metrics"][0]
+    assert host_metric["freshness"] == "very_stale"
+    assert host_metric["age_seconds"] > 3000.0

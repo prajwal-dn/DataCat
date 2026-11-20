@@ -1,285 +1,252 @@
-"""End-to-end integration tests for DATACAT Tier 2 Ingestion API and security rules."""
-import base64
-import os
-import shutil
-import sqlite3
-from pathlib import Path
+"""
+Tests for POST /api/v1/ingest.
+
+All tests use real cryptographic operations (Ed25519 & SHA-256).
+Verifies rejection handling, privacy guarantees, tenant consistency, concurrency,
+request size limits, and sanitization of rejection audits.
+"""
+import asyncio
+import json
+import uuid
+import aiosqlite
 import pytest
-from httpx import ASGITransport, AsyncClient
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.hazmat.primitives import serialization
+from backend.config import DB_PATH, MAX_PAYLOAD_BYTES
+from tests.conftest import build_valid_event
 
-import app.config as config
-from app.core.crypto import canonical_receipt_bytes, compute_payload_hash
-from app.core.registry import registry
-from app.db.database import INIT_SQL
-from app.main import app
-
-# Generate ephemeral test keypair for test_collector_1
-TEST_PRIVATE_KEY = ed25519.Ed25519PrivateKey.generate()
-TEST_PUBLIC_KEY = TEST_PRIVATE_KEY.public_key()
-
-TEST_DATA_DIR = config.BASE_DIR / ".test_data"
+pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture(autouse=True)
-def setup_test_environment(monkeypatch):
-    """Configures isolated workspace-local test database and collector configuration."""
-    if TEST_DATA_DIR.exists():
-        shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
-    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+async def test_ingest_valid_event(client, ed25519_keypair, tenant_id):
+    """Happy path: valid hash, valid signature, registered key -> 202 accepted."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
 
-    test_db = TEST_DATA_DIR / "test_datacat.db"
-    test_yaml = TEST_DATA_DIR / "test_collectors.yaml"
-    test_pub_key = TEST_DATA_DIR / "test_collector_pub.pem"
-
-    pub_bytes = TEST_PUBLIC_KEY.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    resp = await client.post(
+        "/api/v1/ingest",
+        json=body,
+        headers={"X-Tenant-ID": tenant_id},
     )
-    test_pub_key.write_bytes(pub_bytes)
+    assert resp.status_code == 202, resp.text
+    data = resp.json()
+    assert data["status"] == "accepted"
+    assert data["hash_verified"] is True
+    assert data["signature_verified"] is True
+    assert data["duplicate"] is False
+    assert "stored_at" in data
 
-    test_yaml.write_text(f"""
-collectors:
-  - collector_id: test_collector_1
-    tenant_id: hospital_01
-    public_key_path: {str(test_pub_key).replace('\\', '/')}
-    active: true
-  - collector_id: inactive_collector
-    tenant_id: hospital_01
-    public_key_path: {str(test_pub_key).replace('\\', '/')}
-    active: false
-""", encoding="utf-8")
 
-    # Initialize SQLite tables
-    con = sqlite3.connect(test_db)
-    con.executescript(INIT_SQL)
-    now_utc = "2026-11-20T16:00:00Z"
-    con.execute(
-        "INSERT INTO collectors (collector_id, tenant_id, public_key_path, status, last_seen_seq, created_at_utc) VALUES (?, ?, ?, ?, 0, ?)",
-        ("test_collector_1", "hospital_01", str(test_pub_key), "ACTIVE", now_utc),
+async def test_ingest_duplicate_event(client, ed25519_keypair, tenant_id):
+    """Submitting the same (tenant_id, event_id) twice -> second gets 409."""
+    private_key, pub_b64 = ed25519_keypair
+    shared_id = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, event_id=shared_id)
+
+    r1 = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert r1.status_code == 202
+
+    r2 = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert r2.status_code == 409
+    assert r2.json()["reason"] == "duplicate_event"
+
+
+async def test_ingest_concurrent_duplicates(client, ed25519_keypair, tenant_id):
+    """Concurrent submissions of the same event -> exactly one 202, others 409."""
+    private_key, pub_b64 = ed25519_keypair
+    shared_id = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, event_id=shared_id)
+
+    tasks = [
+        client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+        for _ in range(5)
+    ]
+    responses = await asyncio.gather(*tasks)
+
+    status_codes = [r.status_code for r in responses]
+    assert status_codes.count(202) == 1
+    assert status_codes.count(409) == 4
+
+
+async def test_ingest_bad_hash(client, ed25519_keypair, tenant_id):
+    """Tampered payload hash -> 400 hash_mismatch."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id, tamper_hash=True)
+
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "hash_mismatch"
+
+
+async def test_ingest_bad_signature(client, ed25519_keypair, tenant_id):
+    """Invalid signature bytes -> 400 invalid_signature."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id, tamper_signature=True)
+
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "invalid_signature"
+
+
+async def test_ingest_wrong_tenant_in_signature(client, ed25519_keypair, tenant_id):
+    """Domain-separated signature signed over different tenant -> 400 invalid_signature."""
+    private_key, pub_b64 = ed25519_keypair
+    wrong_tid = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, wrong_tenant_in_sig=wrong_tid)
+
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "invalid_signature"
+
+
+async def test_ingest_unknown_collector(client, ed25519_keypair):
+    """Unregistered tenant_id -> 400 unknown_collector."""
+    private_key, pub_b64 = ed25519_keypair
+    unregistered_tenant = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, unregistered_tenant)
+
+    resp = await client.post(
+        "/api/v1/ingest",
+        json=body,
+        headers={"X-Tenant-ID": unregistered_tenant},
     )
-    con.execute(
-        "INSERT INTO collectors (collector_id, tenant_id, public_key_path, status, last_seen_seq, created_at_utc) VALUES (?, ?, ?, ?, 0, ?)",
-        ("inactive_collector", "hospital_01", str(test_pub_key), "SUSPENDED", now_utc),
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "unknown_collector"
+
+
+async def test_ingest_untrusted_key(client, ed25519_keypair, tenant_id):
+    """Key in request body does not match registered trusted key -> 400 untrusted_key."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    import base64
+    private_key, _ = ed25519_keypair
+    rogue_key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    rogue_b64 = base64.b64encode(rogue_key).decode()
+
+    body = build_valid_event(private_key, rogue_b64, tenant_id, wrong_pubkey_b64=rogue_b64)
+
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "untrusted_key"
+
+
+async def test_ingest_header_tenant_mismatch(client, ed25519_keypair, tenant_id):
+    """X-Tenant-ID header does not match body.tenant_id -> 400 tenant_mismatch."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
+
+    other_tenant = str(uuid.uuid4())
+    resp = await client.post(
+        "/api/v1/ingest",
+        json=body,
+        headers={"X-Tenant-ID": other_tenant},
     )
-    con.commit()
-    con.close()
-
-    monkeypatch.setattr(config, "DB_PATH", test_db)
-    monkeypatch.setattr(config, "COLLECTORS_CONFIG_PATH", test_yaml)
-    monkeypatch.setattr(registry, "config_path", test_yaml)
-    registry.reload()
-
-    yield
-
-    if TEST_DATA_DIR.exists():
-        shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "tenant_mismatch"
 
 
-def create_signed_payload(
-    event_id: str = "evt_100",
-    tenant_id: str = "hospital_01",
-    collector_id: str = "test_collector_1",
-    sequence_number: int = 1,
-    cpu_usage: float = 25.5,
-    private_key: ed25519.Ed25519PrivateKey = TEST_PRIVATE_KEY,
-    tamper_hash: bool = False,
-    extra_field_in_event: bool = False,
-):
-    event = {
-        "event_id": event_id,
-        "tenant_id": tenant_id,
-        "server_id": "srv_icu_01",
-        "timestamp_utc": "2026-11-20T16:00:00Z",
-        "metrics": {
-            "cpu_usage": cpu_usage,
-            "memory_usage": 50.0,
-            "disk_usage": 40.0,
-            "latency_ms": 15.2,
-        },
-        "policy_version": "v1.0",
-    }
-    if extra_field_in_event:
-        event["unauthorized_field"] = "malicious_data"
+async def test_ingest_missing_header_tenant(client, ed25519_keypair, tenant_id):
+    """Missing X-Tenant-ID header -> 400 tenant_mismatch."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
 
-    payload_hash = compute_payload_hash(event)
-    if tamper_hash:
-        payload_hash = "f" * 64
-
-    receipt = {
-        "event_id": event_id,
-        "tenant_id": tenant_id,
-        "payload_hash": payload_hash,
-        "collector_id": collector_id,
-        "sequence_number": sequence_number,
-        "policy_version": "v1.0",
-        "algorithm": "Ed25519",
-    }
-
-    sig_bytes = private_key.sign(canonical_receipt_bytes(receipt))
-    receipt["signature"] = base64.b64encode(sig_bytes).decode("utf-8")
-
-    return {"event": event, "receipt": receipt}
+    resp = await client.post("/api/v1/ingest", json=body)
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "tenant_mismatch"
 
 
-@pytest.mark.asyncio
-async def test_health_check_endpoint():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.get("/api/v1/health")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "healthy"
-        assert data["database"] == "connected"
+async def test_ingest_missing_required_fields(client, tenant_id):
+    """Malformed schema -> 422 Unprocessable Entity."""
+    resp = await client.post(
+        "/api/v1/ingest",
+        json={"tenant_id": tenant_id},
+        headers={"X-Tenant-ID": tenant_id},
+    )
+    assert resp.status_code == 422
 
 
-@pytest.mark.asyncio
-async def test_valid_ingestion_flow():
-    payload = create_signed_payload(event_id="evt_valid_1", sequence_number=1)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/api/v1/ingest", json=payload)
-        assert res.status_code == 201
-        data = res.json()
-        assert data["status"] == "ACCEPTED"
-        assert data["event_id"] == "evt_valid_1"
+async def test_ingest_payload_size_limit_exceeded(client, ed25519_keypair, tenant_id):
+    """Request exceeding MAX_PAYLOAD_BYTES is rejected with 413."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
+    # Inflate body with large string > 1 MB
+    body["event"]["payload"]["bloat"] = "X" * (MAX_PAYLOAD_BYTES + 1024)
+
+    raw_json = json.dumps(body)
+    resp = await client.post(
+        "/api/v1/ingest",
+        content=raw_json,
+        headers={"X-Tenant-ID": tenant_id, "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 413
+    assert resp.json()["reason"] == "payload_too_large"
 
 
-@pytest.mark.asyncio
-async def test_duplicate_idempotent_event():
-    payload = create_signed_payload(event_id="evt_dup_1", sequence_number=2)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res1 = await client.post("/api/v1/ingest", json=payload)
-        assert res1.status_code == 201
+async def test_rejection_audit_sanitization(client, ed25519_keypair, tenant_id):
+    """
+    Malicious or non-standard characters in rejection metadata (e.g. XSS payloads)
+    must be strictly filtered and sanitized before writing to rejection_audit.
+    """
+    private_key, pub_b64 = ed25519_keypair
+    raw_bad_event_id = "evt-<script>alert('xss')</script>-123"
+    raw_bad_host = "host'; DROP TABLE events; --"
+    raw_bad_type = "type<img src=x onerror=alert(1)>"
 
-        # Resending same event ID with identical payload and hash
-        res2 = await client.post("/api/v1/ingest", json=payload)
-        assert res2.status_code == 200
-        data = res2.json()
-        assert data["status"] == "DUPLICATE"
+    body = build_valid_event(
+        private_key,
+        pub_b64,
+        tenant_id,
+        event_id=raw_bad_event_id,
+        event_type=raw_bad_type,
+        source_host=raw_bad_host,
+        tamper_signature=True,
+    )
 
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
 
-@pytest.mark.asyncio
-async def test_duplicate_event_with_conflicting_hash():
-    payload1 = create_signed_payload(event_id="evt_conflict_1", sequence_number=3, cpu_usage=20.0)
-    payload2 = create_signed_payload(event_id="evt_conflict_1", sequence_number=4, cpu_usage=99.0)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res1 = await client.post("/api/v1/ingest", json=payload1)
-        assert res1.status_code == 201
-
-        res2 = await client.post("/api/v1/ingest", json=payload2)
-        assert res2.status_code == 409
-        data = res2.json()
-        assert data["status"] == "DUPLICATE_CONFLICT"
-
-
-@pytest.mark.asyncio
-async def test_sequence_number_reuse_rejection():
-    # Send event 1 with sequence number 5
-    p1 = create_signed_payload(event_id="evt_seq_1", sequence_number=5)
-    # Send different event with same sequence number 5
-    p2 = create_signed_payload(event_id="evt_seq_2", sequence_number=5)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res1 = await client.post("/api/v1/ingest", json=p1)
-        assert res1.status_code == 201
-
-        res2 = await client.post("/api/v1/ingest", json=p2)
-        assert res2.status_code == 409
-        data = res2.json()
-        assert data["status"] == "SEQUENCE_CONFLICT"
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM rejection_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 1",
+            (tenant_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            assert row is not None
+            # Verify script tags and SQL injection strings are filtered out
+            assert "<script>" not in row["event_id"]
+            assert "DROP TABLE" not in row["source_host"]
+            assert "<img" not in row["event_type"]
 
 
-@pytest.mark.asyncio
-async def test_out_of_order_event_accepted():
-    # Send sequence 10, then sequence 8 (both unused)
-    p_future = create_signed_payload(event_id="evt_seq_10", sequence_number=10)
-    p_delayed = create_signed_payload(event_id="evt_seq_8", sequence_number=8)
+async def test_rejected_data_privacy(client, ed25519_keypair, tenant_id):
+    """
+    Privacy verification:
+    1. Rejection is stored in rejection_audit with sanitized metadata only.
+    2. Raw payload, signature, and keys are NEVER stored in rejection_audit.
+    3. Rejected event is NEVER inserted into the events table.
+    """
+    private_key, pub_b64 = ed25519_keypair
+    tampered_evt_id = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, event_id=tampered_evt_id, tamper_hash=True)
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res1 = await client.post("/api/v1/ingest", json=p_future)
-        assert res1.status_code == 201
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
 
-        res2 = await client.post("/api/v1/ingest", json=p_delayed)
-        assert res2.status_code == 201
-        data = res2.json()
-        assert data["status"] == "ACCEPTED"
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
 
+        # Check events table: MUST NOT EXIST
+        async with db.execute("SELECT * FROM events WHERE event_id = ?", (tampered_evt_id,)) as cur:
+            event_row = await cur.fetchone()
+            assert event_row is None, "Rejected event must not be present in events table"
 
-@pytest.mark.asyncio
-async def test_tampered_payload_hash_mismatch():
-    payload = create_signed_payload(event_id="evt_tamper_hash", sequence_number=15, tamper_hash=True)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/api/v1/ingest", json=payload)
-        assert res.status_code == 400
-        data = res.json()
-        assert data["status"] == "HASH_MISMATCH"
-
-
-@pytest.mark.asyncio
-async def test_invalid_signature_rejection():
-    # Sign with a different, unauthorized private key
-    unauthorized_key = ed25519.Ed25519PrivateKey.generate()
-    payload = create_signed_payload(event_id="evt_bad_sig", sequence_number=20, private_key=unauthorized_key)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/api/v1/ingest", json=payload)
-        assert res.status_code == 401
-        data = res.json()
-        assert data["status"] == "INVALID_SIGNATURE"
-
-
-@pytest.mark.asyncio
-async def test_unknown_or_inactive_collector():
-    # Unknown collector
-    p_unknown = create_signed_payload(event_id="evt_unknown", collector_id="unregistered_collector", sequence_number=25)
-    # Inactive collector
-    p_inactive = create_signed_payload(event_id="evt_inactive", collector_id="inactive_collector", sequence_number=26)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res1 = await client.post("/api/v1/ingest", json=p_unknown)
-        assert res1.status_code == 403
-        assert res1.json()["status"] == "UNKNOWN_COLLECTOR"
-
-        res2 = await client.post("/api/v1/ingest", json=p_inactive)
-        assert res2.status_code == 403
-        assert res2.json()["status"] == "UNKNOWN_COLLECTOR"
-
-
-@pytest.mark.asyncio
-async def test_tenant_mismatch_rejection():
-    payload = create_signed_payload(event_id="evt_wrong_tenant", tenant_id="rogue_tenant", sequence_number=30)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/api/v1/ingest", json=payload)
-        assert res.status_code == 403
-        assert res.json()["status"] == "TENANT_MISMATCH"
-
-
-@pytest.mark.asyncio
-async def test_strict_extra_field_rejection():
-    payload = create_signed_payload(event_id="evt_extra_field", sequence_number=35, extra_field_in_event=True)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/api/v1/ingest", json=payload)
-        assert res.status_code == 400
-        assert res.json()["status"] == "INVALID_SCHEMA"
-
-
-@pytest.mark.asyncio
-async def test_metric_out_of_range_rejection():
-    payload = create_signed_payload(event_id="evt_range_err", sequence_number=40, cpu_usage=150.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res = await client.post("/api/v1/ingest", json=payload)
-        assert res.status_code == 400
-        assert res.json()["status"] == "INVALID_SCHEMA"
+        # Check rejection_audit: MUST EXIST with sanitized metadata only
+        async with db.execute(
+            "SELECT * FROM rejection_audit WHERE event_id = ?", (tampered_evt_id,)
+        ) as cur:
+            audit_row = await cur.fetchone()
+            assert audit_row is not None
+            assert audit_row["rejected_reason"] == "hash_mismatch"
+            assert audit_row["tenant_id"] == tenant_id
+            columns = audit_row.keys()
+            assert "payload" not in columns
+            assert "signature" not in columns
+            assert "public_key" not in columns

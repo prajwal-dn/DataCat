@@ -1,28 +1,44 @@
-# __pycache__
+# Python
+**/__pycache__/
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Environments
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
 .venv/
-env/
 venv/
-ENV/
+env/
 
-# Database
+# Environment
+.env
+.env.*
+
+# Database files — never commit runtime DB
 *.db
+*.sqlite
 *.sqlite3
 
-# Testing
+# Private keys — NEVER commit
+keys/*.pem
+keys/*.key
+keys/*.priv
+keys/private/
+*.private_key
+
+# Test artifacts
 .pytest_cache/
-.pytest_temp/
 .coverage
 htmlcov/
 
-# Test run artefacts (temporary per-test isolated DB directories)
-.test_*/
-.test_unified_aiops_data/
-.test_qa_validation_data/
+# IDE
+.vscode/
+.idea/
+*.swp
 
-# Logs
-*.log
+# OS
+.DS_Store
+Thumbs.db
