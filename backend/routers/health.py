@@ -27,3 +27,4 @@ async def health_check(request: Request):
         db=db_status,
         uptime_seconds=round(uptime, 2),
     )
+

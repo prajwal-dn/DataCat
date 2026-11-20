@@ -28,3 +28,4 @@ def verify_hash(event_dict: dict, expected_hex: str) -> bool:
         return hmac.compare_digest(computed, expected_hex.lower())
     except TypeError:
         return False
+

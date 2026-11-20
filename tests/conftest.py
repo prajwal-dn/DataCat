@@ -2,13 +2,11 @@
 pytest fixtures shared across all test modules.
 
 Generates a real Ed25519 keypair for every test session.
-No mocking of cryptographic operations.
-Uses a temporary SQLite database (never the production DB).
+Uses a temporary SQLite database.
+Follows the domain-separated tenant-bound signing specification:
+  DATACAT-INGEST-V1:{tenant_id}:{payload_hash}
 """
-import asyncio
 import base64
-import json
-import hashlib
 import os
 import tempfile
 import uuid
@@ -19,22 +17,19 @@ import pytest_asyncio
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from httpx import AsyncClient, ASGITransport
 
-# Point to temp DB before importing app modules
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["DATACAT_DB_PATH"] = _tmp_db.name
 
-# Now import app (uses env var for DB path)
 from backend.main import app
 from backend.database import init_db, DB_PATH
 from backend.verification.hash_verify import canonical_hash
+from backend.verification.signature_verify import compute_signing_message
 
-
-# ── Key generation ───────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
 def ed25519_keypair():
-    """Generate a fresh Ed25519 keypair for the test session."""
+    """Generate a fresh Ed25519 keypair for test session."""
     private_key = Ed25519PrivateKey.generate()
     public_key = private_key.public_key()
     pub_bytes = public_key.public_bytes_raw()
@@ -47,11 +42,9 @@ def tenant_id():
     return str(uuid.uuid4())
 
 
-# ── Database bootstrap ───────────────────────────────────────────────────────
-
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_db(ed25519_keypair, tenant_id):
-    """Init schema and seed trusted key once per test session."""
+    """Init schema and register trusted key for the test session."""
     await init_db()
     _, pub_b64 = ed25519_keypair
     async with aiosqlite.connect(DB_PATH) as db:
@@ -62,16 +55,11 @@ async def setup_db(ed25519_keypair, tenant_id):
         await db.commit()
 
 
-# ── HTTP client ──────────────────────────────────────────────────────────────
-
 @pytest_asyncio.fixture
 async def client():
-    """Async HTTPX client backed by the FastAPI app (no real server needed)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
-
-# ── Event builder helper ─────────────────────────────────────────────────────
 
 def build_valid_event(
     private_key: Ed25519PrivateKey,
@@ -82,10 +70,10 @@ def build_valid_event(
     tamper_hash: bool = False,
     tamper_signature: bool = False,
     wrong_tenant_in_sig: str = None,
+    wrong_pubkey_b64: str = None,
 ) -> dict:
     """
-    Build a fully valid ingest request dict, optionally with deliberate flaws.
-    Uses the same canonical hash and tenant-bound signing spec as the backend.
+    Build a valid ingest request dict with domain-separated signature.
     """
     event_id = event_id or str(uuid.uuid4())
     event = {
@@ -100,11 +88,10 @@ def build_valid_event(
     payload_hash = canonical_hash(event)
 
     if tamper_hash:
-        payload_hash = "00" * 32  # all zeros
+        payload_hash = "00" * 32
 
-    # Tenant-bound message: "{tenant_id}:{payload_hash}"
     signing_tenant = wrong_tenant_in_sig or tenant_id
-    message = f"{signing_tenant}:{payload_hash}".encode("utf-8")
+    message = compute_signing_message(signing_tenant, payload_hash)
 
     if tamper_signature:
         signature_b64 = base64.b64encode(b"\x00" * 64).decode()
@@ -118,7 +105,7 @@ def build_valid_event(
         "receipt": {
             "payload_hash": payload_hash,
             "signature": signature_b64,
-            "public_key": pub_b64,
+            "public_key": wrong_pubkey_b64 or pub_b64,
             "signed_at": "2026-11-20T14:00:01Z",
         },
     }

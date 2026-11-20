@@ -48,3 +48,4 @@ async def serve_dashboard():
 
 # Expose start time for health endpoint
 app.state.start_time = _START_TIME
+

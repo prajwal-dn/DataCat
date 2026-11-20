@@ -1,20 +1,15 @@
 """
-Ed25519 signature verification.
+Ed25519 signature verification with domain-separated tenant-bound signing.
 
-Security model:
-- The backend NEVER trusts the public key supplied in the request body.
-- It looks up the REGISTERED trusted key for the tenant from the database.
-- It then validates that receipt.public_key matches the registered key
-  (so the collector knows which key to present, but cannot substitute one).
-- Verification is performed against the registered key.
+Signing specification:
+  Domain separation prefix: DATACAT-INGEST-V1:
+  Deterministic message format:
+    f"DATACAT-INGEST-V1:{tenant_id}:{payload_hash}".encode("utf-8")
 
-Tenant-binding (security fix applied here):
-  The signed message is: f"{tenant_id}:{payload_hash}".encode('utf-8')
-  NOT just bytes.fromhex(payload_hash).
-  This binds the signature to a specific tenant, preventing cross-tenant replay.
-
-  >>> NOTE FOR TEAMMATE: The collector must sign this combined message,
-  >>> NOT just the raw hash bytes. See docs/api-contract.md amendment section.
+Security rules:
+- Backend verifies using the registered public key for tenant_id from trusted_keys.
+- The public key provided in receipt is verified for exact match against trusted_keys.
+- Any verification failure or bad key encoding returns False.
 """
 import base64
 from typing import Optional
@@ -22,11 +17,20 @@ from typing import Optional
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+DOMAIN_SEPARATOR = "DATACAT-INGEST-V1"
+
+
+def compute_signing_message(tenant_id: str, payload_hash_hex: str) -> bytes:
+    """Return the deterministic domain-separated byte message to sign or verify."""
+    return f"{DOMAIN_SEPARATOR}:{tenant_id}:{payload_hash_hex.lower()}".encode("utf-8")
+
 
 def _load_public_key(pubkey_b64: str) -> Optional[Ed25519PublicKey]:
-    """Decode a base64 Ed25519 public key. Returns None on any decode error."""
+    """Decode a base64 Ed25519 public key. Returns None on decode/type errors."""
     try:
         raw = base64.b64decode(pubkey_b64)
+        if len(raw) != 32:
+            return None
         return Ed25519PublicKey.from_public_bytes(raw)
     except Exception:
         return None
@@ -39,16 +43,8 @@ def verify_signature(
     registered_pubkey_b64: str,
 ) -> bool:
     """
-    Verify an Ed25519 signature.
-
-    Args:
-        tenant_id:            The tenant UUID from the request.
-        payload_hash_hex:     Hex-encoded SHA-256 from receipt.payload_hash.
-        signature_b64:        Base64-encoded signature from receipt.signature.
-        registered_pubkey_b64: The trusted public key fetched from DB (NOT from request).
-
-    Returns:
-        True if signature is valid, False otherwise.
+    Verify Ed25519 signature against registered trusted public key using
+    domain-separated, tenant-bound message.
     """
     public_key = _load_public_key(registered_pubkey_b64)
     if public_key is None:
@@ -59,8 +55,7 @@ def verify_signature(
     except Exception:
         return False
 
-    # Tenant-bound message: prevents cross-tenant replay attacks
-    message = f"{tenant_id}:{payload_hash_hex}".encode("utf-8")
+    message = compute_signing_message(tenant_id, payload_hash_hex)
 
     try:
         public_key.verify(sig_bytes, message)
@@ -70,10 +65,7 @@ def verify_signature(
 
 
 def keys_match(request_pubkey_b64: str, registered_pubkey_b64: str) -> bool:
-    """
-    Check that the public key presented in the request matches the registered key.
-    Uses constant-time comparison to prevent timing side-channels.
-    """
+    """Constant-time comparison between request key and registered key."""
     import hmac as _hmac
     try:
         a = base64.b64decode(request_pubkey_b64)

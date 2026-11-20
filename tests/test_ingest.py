@@ -1,20 +1,21 @@
 """
 Tests for POST /api/v1/ingest.
 
-All cases use a real Ed25519 keypair (generated in conftest.py).
-No cryptographic mocking.
+All tests use real cryptographic operations (Ed25519 & SHA-256).
+Verifies rejection handling, privacy guarantees, tenant consistency, and concurrency.
 """
+import asyncio
 import uuid
+import aiosqlite
 import pytest
-import pytest_asyncio
-
+from backend.config import DB_PATH
+from tests.conftest import build_valid_event
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_ingest_valid_event(client, ed25519_keypair, tenant_id):
-    """Happy path: valid hash + valid signature → 202 accepted."""
-    from tests.conftest import build_valid_event
+    """Happy path: valid hash, valid signature, registered key -> 202 accepted."""
     private_key, pub_b64 = ed25519_keypair
     body = build_valid_event(private_key, pub_b64, tenant_id)
 
@@ -33,8 +34,7 @@ async def test_ingest_valid_event(client, ed25519_keypair, tenant_id):
 
 
 async def test_ingest_duplicate_event(client, ed25519_keypair, tenant_id):
-    """Submitting the same event_id twice → second gets 409."""
-    from tests.conftest import build_valid_event
+    """Submitting the same (tenant_id, event_id) twice -> second gets 409."""
     private_key, pub_b64 = ed25519_keypair
     shared_id = str(uuid.uuid4())
     body = build_valid_event(private_key, pub_b64, tenant_id, event_id=shared_id)
@@ -47,9 +47,26 @@ async def test_ingest_duplicate_event(client, ed25519_keypair, tenant_id):
     assert r2.json()["reason"] == "duplicate_event"
 
 
+async def test_ingest_concurrent_duplicates(client, ed25519_keypair, tenant_id):
+    """Concurrent submissions of the same event -> exactly one 202, others 409."""
+    private_key, pub_b64 = ed25519_keypair
+    shared_id = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, event_id=shared_id)
+
+    # Fire 5 concurrent requests with identical event_id
+    tasks = [
+        client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+        for _ in range(5)
+    ]
+    responses = await asyncio.gather(*tasks)
+
+    status_codes = [r.status_code for r in responses]
+    assert status_codes.count(202) == 1
+    assert status_codes.count(409) == 4
+
+
 async def test_ingest_bad_hash(client, ed25519_keypair, tenant_id):
-    """Tampered hash → 400 hash_mismatch."""
-    from tests.conftest import build_valid_event
+    """Tampered payload hash -> 400 hash_mismatch."""
     private_key, pub_b64 = ed25519_keypair
     body = build_valid_event(private_key, pub_b64, tenant_id, tamper_hash=True)
 
@@ -59,8 +76,7 @@ async def test_ingest_bad_hash(client, ed25519_keypair, tenant_id):
 
 
 async def test_ingest_bad_signature(client, ed25519_keypair, tenant_id):
-    """Valid hash, invalid signature → 400 invalid_signature."""
-    from tests.conftest import build_valid_event
+    """Invalid signature bytes -> 400 invalid_signature."""
     private_key, pub_b64 = ed25519_keypair
     body = build_valid_event(private_key, pub_b64, tenant_id, tamper_signature=True)
 
@@ -70,52 +86,73 @@ async def test_ingest_bad_signature(client, ed25519_keypair, tenant_id):
 
 
 async def test_ingest_wrong_tenant_in_signature(client, ed25519_keypair, tenant_id):
-    """
-    Signature signed over wrong_tenant:hash → fails even if hash is correct.
-    This validates tenant-binding protection.
-    """
-    from tests.conftest import build_valid_event
+    """Domain-separated signature signed over different tenant -> 400 invalid_signature."""
     private_key, pub_b64 = ed25519_keypair
-    body = build_valid_event(
-        private_key, pub_b64, tenant_id,
-        wrong_tenant_in_sig="00000000-0000-0000-0000-000000000000",
-    )
+    wrong_tid = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, wrong_tenant_in_sig=wrong_tid)
 
     resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
     assert resp.status_code == 400
     assert resp.json()["reason"] == "invalid_signature"
 
 
-async def test_ingest_unknown_tenant(client, ed25519_keypair):
-    """Tenant not in trusted_keys → 400 unknown_collector."""
-    from tests.conftest import build_valid_event
+async def test_ingest_unknown_collector(client, ed25519_keypair):
+    """Unregistered tenant_id -> 400 unknown_collector."""
     private_key, pub_b64 = ed25519_keypair
-    unknown_tenant = str(uuid.uuid4())
-    body = build_valid_event(private_key, pub_b64, unknown_tenant)
-    body["tenant_id"] = unknown_tenant
-    body["event"]["event_id"] = str(uuid.uuid4())
-
-    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": unknown_tenant})
-    assert resp.status_code == 400
-    assert resp.json()["reason"] == "unknown_collector"
-
-
-async def test_ingest_header_body_tenant_mismatch(client, ed25519_keypair, tenant_id):
-    """X-Tenant-ID header ≠ body tenant_id → 400 tenant_mismatch."""
-    from tests.conftest import build_valid_event
-    private_key, pub_b64 = ed25519_keypair
-    body = build_valid_event(private_key, pub_b64, tenant_id)
+    unregistered_tenant = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, unregistered_tenant)
 
     resp = await client.post(
         "/api/v1/ingest",
         json=body,
-        headers={"X-Tenant-ID": "different-tenant-id"},
+        headers={"X-Tenant-ID": unregistered_tenant},
     )
     assert resp.status_code == 400
+    assert resp.json()["reason"] == "unknown_collector"
+
+
+async def test_ingest_untrusted_key(client, ed25519_keypair, tenant_id):
+    """Key in request body does not match registered trusted key -> 400 untrusted_key."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    import base64
+    private_key, _ = ed25519_keypair
+    rogue_key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    rogue_b64 = base64.b64encode(rogue_key).decode()
+
+    body = build_valid_event(private_key, rogue_b64, tenant_id, wrong_pubkey_b64=rogue_b64)
+
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "untrusted_key"
+
+
+async def test_ingest_header_tenant_mismatch(client, ed25519_keypair, tenant_id):
+    """X-Tenant-ID header does not match body.tenant_id -> 400 tenant_mismatch."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
+
+    other_tenant = str(uuid.uuid4())
+    resp = await client.post(
+        "/api/v1/ingest",
+        json=body,
+        headers={"X-Tenant-ID": other_tenant},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "tenant_mismatch"
+
+
+async def test_ingest_missing_header_tenant(client, ed25519_keypair, tenant_id):
+    """Missing X-Tenant-ID header -> 400 tenant_mismatch."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
+
+    resp = await client.post("/api/v1/ingest", json=body)
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "tenant_mismatch"
 
 
 async def test_ingest_missing_required_fields(client, tenant_id):
-    """Missing required fields → 422 validation error."""
+    """Malformed schema -> 422 Unprocessable Entity."""
     resp = await client.post(
         "/api/v1/ingest",
         json={"tenant_id": tenant_id},
@@ -124,27 +161,38 @@ async def test_ingest_missing_required_fields(client, tenant_id):
     assert resp.status_code == 422
 
 
-async def test_rejected_event_has_no_payload_in_db(client, ed25519_keypair, tenant_id):
+async def test_rejected_data_privacy(client, ed25519_keypair, tenant_id):
     """
-    Privacy rule: rejected events must not store the payload in the DB.
+    Privacy verification:
+    1. Rejection is stored in rejection_audit with sanitized metadata only.
+    2. Raw payload, signature, and keys are NEVER stored in rejection_audit.
+    3. Rejected event is NEVER inserted into the events table.
     """
-    import aiosqlite
-    from backend.config import DB_PATH
-    from tests.conftest import build_valid_event
-
     private_key, pub_b64 = ed25519_keypair
-    body = build_valid_event(private_key, pub_b64, tenant_id, tamper_hash=True)
-    evt_id = body["event"]["event_id"]
+    tampered_evt_id = str(uuid.uuid4())
+    body = build_valid_event(private_key, pub_b64, tenant_id, event_id=tampered_evt_id, tamper_hash=True)
 
     resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
     assert resp.status_code == 400
 
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT payload FROM events WHERE event_id = ?", (evt_id,)
-        ) as cur:
-            row = await cur.fetchone()
+        db.row_factory = aiosqlite.Row
 
-    # row may not exist (hash tamper before dedup insert) OR payload must be NULL
-    if row is not None:
-        assert row[0] is None, "Rejected event must not store payload"
+        # Check events table: MUST NOT EXIST
+        async with db.execute("SELECT * FROM events WHERE event_id = ?", (tampered_evt_id,)) as cur:
+            event_row = await cur.fetchone()
+            assert event_row is None, "Rejected event must not be present in events table"
+
+        # Check rejection_audit: MUST EXIST with sanitized metadata only
+        async with db.execute(
+            "SELECT * FROM rejection_audit WHERE event_id = ?", (tampered_evt_id,)
+        ) as cur:
+            audit_row = await cur.fetchone()
+            assert audit_row is not None
+            assert audit_row["rejected_reason"] == "hash_mismatch"
+            assert audit_row["tenant_id"] == tenant_id
+            # Verify no payload columns exist in table info
+            columns = audit_row.keys()
+            assert "payload" not in columns
+            assert "signature" not in columns
+            assert "public_key" not in columns

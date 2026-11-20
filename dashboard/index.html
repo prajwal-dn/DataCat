@@ -14,7 +14,6 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; font-size: 14px; }
 
-  /* Layout */
   header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
   header h1 { font-size: 18px; color: var(--accent); letter-spacing: 1px; }
   header .meta { color: var(--muted); font-size: 12px; display: flex; gap: 16px; align-items: center; }
@@ -25,22 +24,20 @@
 
   main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
 
-  /* Tenant selector */
-  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
-  .toolbar label { color: var(--muted); font-size: 12px; }
-  select, input[type=text] {
-    background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none;
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; background: var(--surface); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); }
+  .toolbar label { color: var(--muted); font-size: 12px; font-weight: 600; }
+  input[type=text] {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 12px; font-size: 13px; outline: none; width: 340px;
   }
-  select:focus, input:focus { border-color: var(--accent); }
+  input:focus { border-color: var(--accent); }
   button.refresh {
     background: var(--accent); color: #000; border: none; border-radius: 6px;
     padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600;
   }
   button.refresh:hover { opacity: 0.85; }
-  #auto-label { color: var(--muted); font-size: 12px; }
+  #auto-label { color: var(--muted); font-size: 12px; margin-left: auto; }
 
-  /* Stats cards */
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
   .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
@@ -51,11 +48,9 @@
   .card.purple .value { color: var(--purple); }
   .card.blue .value { color: var(--accent); }
 
-  /* Section headers */
   .section { margin-bottom: 28px; }
   .section h2 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 
-  /* Tables */
   .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
   table { width: 100%; border-collapse: collapse; }
   th { background: var(--surface); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
@@ -64,41 +59,26 @@
   tr:hover td { background: #1c2128; }
   .mono { font-family: monospace; font-size: 12px; color: var(--muted); }
 
-  /* Badges */
   .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
   .badge.fail { background: rgba(248,81,73,.15); color: var(--red); }
   .badge.warn { background: rgba(210,153,34,.15); color: var(--yellow); }
   .badge.dup { background: rgba(188,140,255,.15); color: var(--purple); }
 
-  /* Incidents */
   .incident-list { display: flex; flex-direction: column; gap: 8px; }
-  .incident-item { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--red); border-radius: 6px; padding: 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .incident-item { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--red); border-radius: 6px; padding: 12px; display: flex; gap: 12px; align-items: flex-start; }
   .incident-item.dup { border-left-color: var(--purple); }
   .incident-item.hash { border-left-color: var(--yellow); }
-  .incident-meta { flex: 1; min-width: 200px; }
+  .incident-meta { flex: 1; }
   .incident-meta .eid { font-family: monospace; font-size: 11px; color: var(--muted); }
-  .incident-meta .host { font-size: 12px; margin-top: 2px; }
-  .incident-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .incident-time { font-size: 11px; color: var(--muted); }
 
-  /* Pagination */
   .pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
   .pagination button { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
   .pagination button:disabled { opacity: 0.4; cursor: default; }
-  .pagination span { color: var(--muted); font-size: 12px; }
 
-  /* Loader */
   .loading { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
-  .error-msg { color: var(--red); font-size: 13px; padding: 12px; background: rgba(248,81,73,.08); border-radius: 6px; }
-
-  /* Health bar */
-  .health-bar { display: flex; gap: 20px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; flex-wrap: wrap; }
-  .health-bar .item { display: flex; flex-direction: column; gap: 2px; }
-  .health-bar .item .k { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .health-bar .item .v { font-size: 14px; font-weight: 600; }
-
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  @media(max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .empty-banner { background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; padding: 30px; text-align: center; color: var(--muted); margin-bottom: 20px; }
 </style>
 </head>
 <body>
@@ -109,299 +89,178 @@
     <span><span id="status-dot"></span> <span id="platform-status">connecting…</span></span>
     <span>v<span id="platform-version">—</span></span>
     <span>Uptime: <span id="platform-uptime">—</span></span>
-    <span id="last-refresh" style="color:var(--muted)"></span>
+    <span id="last-refresh"></span>
   </div>
 </header>
 
 <main>
-  <!-- Toolbar -->
   <div class="toolbar">
-    <label>Tenant</label>
-    <select id="tenant-select"><option value="">All Tenants</option></select>
-    <label>Status</label>
-    <select id="status-filter">
-      <option value="all">All</option>
-      <option value="accepted">Accepted</option>
-      <option value="rejected">Rejected</option>
-    </select>
-    <button class="refresh" onclick="refreshAll()">↺ Refresh</button>
-    <span id="auto-label">Auto-refresh: 10s</span>
+    <label for="tenant-input">Tenant ID (Required):</label>
+    <input type="text" id="tenant-input" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" />
+    <button class="refresh" onclick="onTenantApply()">Load Telemetry</button>
+    <span id="auto-label">Tenant Isolation: Strict</span>
   </div>
 
-  <!-- Health bar -->
-  <div class="health-bar" id="health-bar">
-    <div class="item"><div class="k">DB</div><div class="v" id="hb-db">—</div></div>
-    <div class="item"><div class="k">Total Events</div><div class="v" id="hb-total">—</div></div>
-    <div class="item"><div class="k">Accepted</div><div class="v" style="color:var(--green)" id="hb-accepted">—</div></div>
-    <div class="item"><div class="k">Rejected</div><div class="v" style="color:var(--red)" id="hb-rejected">—</div></div>
-    <div class="item"><div class="k">Active Tenants</div><div class="v" id="hb-tenants">—</div></div>
-    <div class="item"><div class="k">Last Event</div><div class="v" id="hb-last">—</div></div>
+  <div id="tenant-prompt" class="empty-banner">
+    Please enter a Tenant ID above to display verified transmissions and audit records.
   </div>
 
-  <!-- Summary cards -->
-  <div class="cards">
-    <div class="card blue"><div class="label">Total Events</div><div class="value" id="c-total">—</div></div>
-    <div class="card green"><div class="label">Accepted</div><div class="value" id="c-accepted">—</div></div>
-    <div class="card red"><div class="label">Rejected</div><div class="value" id="c-rejected">—</div></div>
-    <div class="card yellow"><div class="label">Hash Failures</div><div class="value" id="c-hash">—</div></div>
-    <div class="card red"><div class="label">Sig Failures</div><div class="value" id="c-sig">—</div></div>
-    <div class="card purple"><div class="label">Duplicates</div><div class="value" id="c-dup">—</div></div>
-  </div>
+  <div id="dashboard-content" style="display:none;">
+    <div class="cards">
+      <div class="card blue"><div class="label">Total Events</div><div class="value" id="c-total">0</div></div>
+      <div class="card green"><div class="label">Accepted</div><div class="value" id="c-accepted">0</div></div>
+      <div class="card red"><div class="label">Rejected</div><div class="value" id="c-rejected">0</div></div>
+      <div class="card yellow"><div class="label">Hash Failures</div><div class="value" id="c-hash">0</div></div>
+      <div class="card red"><div class="label">Sig Failures</div><div class="value" id="c-sig">0</div></div>
+      <div class="card purple"><div class="label">Duplicates</div><div class="value" id="c-dup">0</div></div>
+    </div>
 
-  <div class="grid2">
-    <!-- Events table -->
-    <div class="section" style="grid-column:1/-1">
-      <h2>Transmissions</h2>
+    <div class="section">
+      <h2>Verified Transmissions</h2>
       <div class="table-wrap">
-        <table id="events-table">
+        <table>
           <thead>
             <tr>
               <th>Event ID</th>
-              <th>Tenant</th>
               <th>Type</th>
-              <th>Source Host</th>
-              <th>Hash</th>
-              <th>Signature</th>
+              <th>Host</th>
+              <th>Hash Verified</th>
+              <th>Sig Verified</th>
               <th>Status</th>
               <th>Ingested At</th>
             </tr>
           </thead>
-          <tbody id="events-body"><tr><td colspan="8" class="loading">Loading…</td></tr></tbody>
+          <tbody id="events-body"><tr><td colspan="7" class="loading">Loading…</td></tr></tbody>
         </table>
       </div>
       <div class="pagination">
         <button id="btn-prev" onclick="prevPage()" disabled>← Prev</button>
-        <span id="page-info">—</span>
+        <span id="page-info" style="color:var(--muted);font-size:12px;">—</span>
         <button id="btn-next" onclick="nextPage()">Next →</button>
       </div>
     </div>
 
-    <!-- Incidents -->
-    <div class="section" style="grid-column:1/-1">
-      <h2>Incidents &amp; Anomalies</h2>
+    <div class="section">
+      <h2>Sanitized Rejection &amp; Incident Audit</h2>
       <div id="incidents-container" class="incident-list"><div class="loading">Loading…</div></div>
     </div>
   </div>
 </main>
 
 <script>
-const API = '';  // same origin
 let currentPage = 0;
 const PAGE_SIZE = 20;
-let currentTenant = '';
-let currentStatus = 'all';
-let _knownTenants = new Set();
+let activeTenant = localStorage.getItem('datacat_tenant_id') || '';
 
-// ── Fetch helpers ──────────────────────────────────────────────────────────
+if (activeTenant) {
+  document.getElementById('tenant-input').value = activeTenant;
+}
 
 async function apiFetch(path) {
-  const resp = await fetch(API + path);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}`);
+  const resp = await fetch(path);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
 }
-
-function tenantParam(prefix = '?') {
-  if (!currentTenant) return '';
-  return `${prefix}tenant_id=${encodeURIComponent(currentTenant)}`;
-}
-
-// ── Health ─────────────────────────────────────────────────────────────────
 
 async function loadHealth() {
   try {
     const h = await apiFetch('/api/v1/health');
     const dot = document.getElementById('status-dot');
-    dot.className = h.status === 'ok' ? 'ok' : (h.status === 'degraded' ? 'degraded' : 'error');
+    dot.className = h.status === 'ok' ? 'ok' : 'error';
     document.getElementById('platform-status').textContent = h.status;
     document.getElementById('platform-version').textContent = h.version;
-    const up = h.uptime_seconds;
-    const hh = Math.floor(up / 3600), mm = Math.floor((up % 3600) / 60), ss = Math.floor(up % 60);
-    document.getElementById('platform-uptime').textContent =
-      `${hh}h ${mm}m ${ss}s`;
-    document.getElementById('hb-db').textContent = h.db;
-    document.getElementById('hb-db').style.color = h.db === 'connected' ? 'var(--green)' : 'var(--red)';
+    const up = Math.floor(h.uptime_seconds);
+    document.getElementById('platform-uptime').textContent = `${up}s`;
   } catch(e) {
-    document.getElementById('platform-status').textContent = 'unreachable';
     document.getElementById('status-dot').className = 'error';
+    document.getElementById('platform-status').textContent = 'offline';
   }
 }
 
-// ── Stats ──────────────────────────────────────────────────────────────────
-
-async function loadStats() {
-  try {
-    const s = await apiFetch('/api/v1/stats' + tenantParam('?'));
-    document.getElementById('c-total').textContent    = s.total_events;
-    document.getElementById('c-accepted').textContent = s.accepted;
-    document.getElementById('c-rejected').textContent = s.rejected;
-    document.getElementById('c-hash').textContent     = s.hash_failures;
-    document.getElementById('c-sig').textContent      = s.signature_failures;
-    document.getElementById('c-dup').textContent      = s.duplicate_rejections;
-    document.getElementById('hb-total').textContent    = s.total_events;
-    document.getElementById('hb-accepted').textContent = s.accepted;
-    document.getElementById('hb-rejected').textContent = s.rejected;
-    document.getElementById('hb-tenants').textContent  = s.tenants_active;
-    document.getElementById('hb-last').textContent     = s.last_event_at
-      ? new Date(s.last_event_at).toLocaleTimeString() : '—';
-  } catch(e) {
-    document.getElementById('c-total').textContent = 'err';
+async function loadTenantData() {
+  if (!activeTenant) {
+    document.getElementById('tenant-prompt').style.display = 'block';
+    document.getElementById('dashboard-content').style.display = 'none';
+    return;
   }
-}
-
-// ── Events table ───────────────────────────────────────────────────────────
-
-function statusBadge(status) {
-  return status === 'accepted'
-    ? '<span class="badge ok">✓ accepted</span>'
-    : '<span class="badge fail">✗ rejected</span>';
-}
-function boolBadge(v) {
-  return v
-    ? '<span class="badge ok">✓</span>'
-    : '<span class="badge fail">✗</span>';
-}
-function shortId(id) {
-  return `<span class="mono" title="${id}">${id.slice(0,8)}…</span>`;
-}
-
-async function loadEvents() {
-  const offset = currentPage * PAGE_SIZE;
-  const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
-  if (currentTenant) params.set('tenant_id', currentTenant);
-  if (currentStatus !== 'all') params.set('status', currentStatus);
-
-  const tbody = document.getElementById('events-body');
-  tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading…</td></tr>';
+  document.getElementById('tenant-prompt').style.display = 'none';
+  document.getElementById('dashboard-content').style.display = 'block';
 
   try {
-    const data = await apiFetch(`/api/v1/events?${params}`);
-    if (data.events.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="loading" style="color:var(--muted)">No events yet. Send a POST to /api/v1/ingest to get started.</td></tr>';
+    const tid = encodeURIComponent(activeTenant);
+    const [stats, events, incidents] = await Promise.all([
+      apiFetch(`/api/v1/stats?tenant_id=${tid}`),
+      apiFetch(`/api/v1/events?tenant_id=${tid}&limit=${PAGE_SIZE}&offset=${currentPage * PAGE_SIZE}`),
+      apiFetch(`/api/v1/incidents?tenant_id=${tid}&limit=50`)
+    ]);
+
+    document.getElementById('c-total').textContent = stats.total_events;
+    document.getElementById('c-accepted').textContent = stats.accepted;
+    document.getElementById('c-rejected').textContent = stats.rejected;
+    document.getElementById('c-hash').textContent = stats.hash_failures;
+    document.getElementById('c-sig').textContent = stats.signature_failures;
+    document.getElementById('c-dup').textContent = stats.duplicate_rejections;
+
+    const tbody = document.getElementById('events-body');
+    if (events.events.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="loading">No events recorded for this tenant.</td></tr>';
     } else {
-      tbody.innerHTML = data.events.map(e => `
+      tbody.innerHTML = events.events.map(e => `
         <tr>
-          <td>${shortId(e.event_id)}</td>
-          <td>${shortId(e.tenant_id)}</td>
+          <td class="mono">${e.event_id.slice(0, 8)}…</td>
           <td><span class="mono">${e.event_type}</span></td>
           <td>${e.source_host}</td>
-          <td>${boolBadge(e.hash_verified)}</td>
-          <td>${boolBadge(e.signature_verified)}</td>
-          <td>${statusBadge(e.status)}</td>
-          <td class="mono">${e.ingested_at.replace('T',' ').replace('Z','')}</td>
+          <td><span class="badge ok">✓ Verified</span></td>
+          <td><span class="badge ok">✓ Verified</span></td>
+          <td><span class="badge ok">✓ Accepted</span></td>
+          <td class="mono">${e.ingested_at.replace('T', ' ').replace('Z', '')}</td>
         </tr>
       `).join('');
-
-      // Collect tenants for selector
-      data.events.forEach(e => {
-        if (!_knownTenants.has(e.tenant_id)) {
-          _knownTenants.add(e.tenant_id);
-          populateTenantSelect();
-        }
-      });
     }
 
-    // Pagination controls
-    const total = data.total;
-    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    document.getElementById('page-info').textContent =
-      `Page ${currentPage + 1} of ${totalPages} (${total} total)`;
+    const totalPages = Math.max(1, Math.ceil(events.total / PAGE_SIZE));
+    document.getElementById('page-info').textContent = `Page ${currentPage + 1} of ${totalPages} (${events.total} total)`;
     document.getElementById('btn-prev').disabled = currentPage === 0;
     document.getElementById('btn-next').disabled = (currentPage + 1) >= totalPages;
-  } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="error-msg">Failed to load events: ${e.message}</div></td></tr>`;
-  }
-}
 
-// ── Incidents ─────────────────────────────────────────────────────────────
-
-function incidentClass(type) {
-  if (type === 'duplicate') return 'dup';
-  if (type === 'hash_mismatch') return 'hash';
-  return '';
-}
-function incidentBadge(type) {
-  const labels = {
-    signature_failure: { cls: 'fail', text: '⚠ Signature Failure' },
-    hash_mismatch:     { cls: 'warn', text: '⚠ Hash Mismatch' },
-    duplicate:         { cls: 'dup',  text: '⊘ Duplicate' },
-    unknown:           { cls: 'fail', text: '? Unknown' },
-  };
-  const l = labels[type] || labels.unknown;
-  return `<span class="badge ${l.cls}">${l.text}</span>`;
-}
-
-async function loadIncidents() {
-  const params = new URLSearchParams({ limit: 50 });
-  if (currentTenant) params.set('tenant_id', currentTenant);
-  const container = document.getElementById('incidents-container');
-  container.innerHTML = '<div class="loading">Loading…</div>';
-
-  try {
-    const data = await apiFetch(`/api/v1/incidents?${params}`);
-    if (data.incidents.length === 0) {
-      container.innerHTML = '<div class="loading" style="color:var(--green)">✓ No incidents recorded</div>';
+    const incContainer = document.getElementById('incidents-container');
+    if (incidents.incidents.length === 0) {
+      incContainer.innerHTML = '<div class="loading" style="color:var(--green)">✓ No rejections or security incidents recorded</div>';
     } else {
-      container.innerHTML = data.incidents.map(inc => `
-        <div class="incident-item ${incidentClass(inc.incident_type)}">
+      incContainer.innerHTML = incidents.incidents.map(inc => `
+        <div class="incident-item ${inc.incident_type === 'duplicate' ? 'dup' : (inc.incident_type === 'hash_mismatch' ? 'hash' : '')}">
           <div class="incident-meta">
-            ${incidentBadge(inc.incident_type)}
-            <div class="eid">${inc.event_id}</div>
-            <div class="host">${inc.source_host} · <span class="mono">${inc.incident_type}</span></div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">${inc.detail}</div>
+            <span class="badge fail">${inc.incident_type}</span>
+            <div class="eid" style="margin-top:4px">${inc.event_id}</div>
+            <div style="font-size:12px;margin-top:2px">${inc.source_host} · Detail: <strong>${inc.detail}</strong></div>
           </div>
-          <div class="incident-time">${inc.timestamp.replace('T',' ').replace('Z','')}</div>
+          <div class="incident-time">${inc.timestamp ? inc.timestamp.replace('T', ' ').replace('Z', '') : ''}</div>
         </div>
       `).join('');
     }
+
+    document.getElementById('last-refresh').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
   } catch(e) {
-    container.innerHTML = `<div class="error-msg">Failed to load incidents: ${e.message}</div>`;
+    console.error(e);
   }
 }
 
-// ── Tenant selector ────────────────────────────────────────────────────────
-
-function populateTenantSelect() {
-  const sel = document.getElementById('tenant-select');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">All Tenants</option>';
-  _knownTenants.forEach(tid => {
-    const opt = document.createElement('option');
-    opt.value = tid;
-    opt.textContent = tid.slice(0, 8) + '…';
-    opt.title = tid;
-    if (tid === current) opt.selected = true;
-    sel.appendChild(opt);
-  });
+function onTenantApply() {
+  const val = document.getElementById('tenant-input').value.trim();
+  if (val) {
+    activeTenant = val;
+    localStorage.setItem('datacat_tenant_id', activeTenant);
+    currentPage = 0;
+    loadTenantData();
+  }
 }
 
-document.getElementById('tenant-select').addEventListener('change', e => {
-  currentTenant = e.target.value;
-  currentPage = 0;
-  refreshAll();
-});
-document.getElementById('status-filter').addEventListener('change', e => {
-  currentStatus = e.target.value;
-  currentPage = 0;
-  loadEvents();
-});
+function prevPage() { if (currentPage > 0) { currentPage--; loadTenantData(); } }
+function nextPage() { currentPage++; loadTenantData(); }
 
-// ── Pagination ─────────────────────────────────────────────────────────────
-
-function prevPage() { if (currentPage > 0) { currentPage--; loadEvents(); } }
-function nextPage() { currentPage++; loadEvents(); }
-
-// ── Full refresh ───────────────────────────────────────────────────────────
-
-async function refreshAll() {
-  await Promise.all([loadHealth(), loadStats(), loadEvents(), loadIncidents()]);
-  document.getElementById('last-refresh').textContent =
-    'Last: ' + new Date().toLocaleTimeString();
-}
-
-// ── Auto-refresh ───────────────────────────────────────────────────────────
-
-refreshAll();
-setInterval(refreshAll, 10_000);
+loadHealth();
+if (activeTenant) { loadTenantData(); }
+setInterval(() => { loadHealth(); if (activeTenant) loadTenantData(); }, 10000);
 </script>
 </body>
 </html>

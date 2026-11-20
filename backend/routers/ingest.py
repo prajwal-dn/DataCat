@@ -1,25 +1,27 @@
 """
 POST /api/v1/ingest — telemetry event ingestion with full verification pipeline.
 
-Verification pipeline (in order):
-  1. Schema validation        (Pydantic — automatic)
-  2. X-Tenant-ID header check (must match body tenant_id)
-  3. Trusted key lookup       (DB — reject if tenant not registered)
-  4. Public key match check   (request key must equal registered key)
-  5. SHA-256 hash verification
-  6. Ed25519 signature verification (using REGISTERED key, tenant-bound message)
-  7. Duplicate detection      (pre-check + DB UNIQUE constraint)
-  8. Store event              (payload=NULL on rejection for privacy)
+Pipeline:
+  1. Header consistency check: X-Tenant-ID must be present and match body.tenant_id
+  2. Trusted key lookup: tenant_id must exist in trusted_keys table
+  3. Public key verification: receipt.public_key must match registered key
+  4. SHA-256 canonical hash verification
+  5. Ed25519 signature verification: domain-separated DATACAT-INGEST-V1 prefix
+  6. Duplicate detection: (tenant_id, event_id) pre-check
+  7. Store accepted event: insert into events table under UNIQUE(tenant_id, event_id)
 
-Privacy rule: rejected events are stored with ONLY metadata — never the payload.
+Rejection privacy:
+  Rejections are stored exclusively in rejection_audit with sanitized metadata.
+  Raw payloads, signatures, and untrusted keys are never stored in rejection records
+  or written to persistent application logs.
 """
 import json
 import aiosqlite
-
 from datetime import datetime, timezone
-from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import JSONResponse
 from typing import Optional
+
+from fastapi import APIRouter, Header, Response
+from fastapi.responses import JSONResponse
 
 from backend.config import DB_PATH
 from backend.models import IngestRequest, IngestAccepted, IngestRejected
@@ -35,7 +37,6 @@ def _now_utc() -> str:
 
 
 async def _get_registered_key(tenant_id: str) -> Optional[str]:
-    """Fetch the registered public key for a tenant. Returns None if not found."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT public_key_b64 FROM trusted_keys WHERE tenant_id = ?",
@@ -46,62 +47,53 @@ async def _get_registered_key(tenant_id: str) -> Optional[str]:
 
 
 async def _store_rejection(
-    event_id: str,
     tenant_id: str,
-    source_host: str,
-    event_type: str,
-    timestamp: str,
+    event_id: str,
+    source_host: Optional[str],
+    event_type: Optional[str],
+    timestamp: Optional[str],
     reason: str,
-    hash_verified: bool,
-    sig_verified: bool,
 ) -> None:
-    """
-    Store rejection metadata only. payload is intentionally omitted (privacy rule).
-    If a duplicate causes IntegrityError here we silently ignore — the original
-    record already exists.
-    """
+    """Store sanitized rejection metadata only in rejection_audit table."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 """
-                INSERT OR IGNORE INTO events
-                    (event_id, tenant_id, timestamp, source_host, event_type,
-                     payload, privacy_tags, status, hash_verified, sig_verified,
-                     rejected_reason, ingested_at)
-                VALUES (?, ?, ?, ?, ?, NULL, NULL, 'rejected', ?, ?, ?, ?)
+                INSERT INTO rejection_audit
+                    (tenant_id, event_id, timestamp, source_host, event_type, rejected_reason, rejected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    event_id, tenant_id, timestamp, source_host, event_type,
-                    int(hash_verified), int(sig_verified),
-                    reason, _now_utc(),
+                    tenant_id,
+                    event_id,
+                    timestamp,
+                    source_host,
+                    event_type,
+                    reason,
+                    _now_utc(),
                 ),
             )
             await db.commit()
     except Exception:
-        pass  # Best-effort; never let storage failure mask the actual rejection response
+        pass
 
 
 async def _store_accepted(req: IngestRequest) -> str:
-    """
-    Store a fully verified event. Returns the ingested_at timestamp.
-    Raises aiosqlite.IntegrityError on duplicate (concurrent race condition).
-    """
+    """Insert into events table. Raises aiosqlite.IntegrityError on concurrent duplicate."""
     ingested_at = _now_utc()
     async with aiosqlite.connect(DB_PATH) as db:
-        # BEGIN IMMEDIATE acquires a write lock immediately, preventing races
         await db.execute("BEGIN IMMEDIATE")
         try:
             await db.execute(
                 """
                 INSERT INTO events
-                    (event_id, tenant_id, timestamp, source_host, event_type,
-                     payload, privacy_tags, status, hash_verified, sig_verified,
-                     rejected_reason, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'accepted', 1, 1, NULL, ?)
+                    (tenant_id, event_id, timestamp, source_host, event_type,
+                     payload, privacy_tags, hash_verified, sig_verified, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
                 """,
                 (
-                    req.event.event_id,
                     req.tenant_id,
+                    req.event.event_id,
                     req.event.timestamp,
                     req.event.source_host,
                     req.event.event_type,
@@ -122,23 +114,38 @@ async def ingest_event(
     body: IngestRequest,
     x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-ID"),
 ):
-    # ── Step 1: Header/body tenant_id consistency ──────────────────────────
-    if x_tenant_id and x_tenant_id != body.tenant_id:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "status": "rejected",
-                "reason": "tenant_mismatch",
-                "detail": "X-Tenant-ID header does not match body tenant_id",
-            },
-        )
-
     evt = body.event
     rcpt = body.receipt
 
-    # ── Step 2: Trusted key registry lookup ───────────────────────────────
+    # 1. Enforce tenant identity consistency with X-Tenant-ID header
+    if not x_tenant_id or x_tenant_id != body.tenant_id:
+        await _store_rejection(
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="tenant_mismatch",
+        )
+        return JSONResponse(
+            status_code=400,
+            content=IngestRejected(
+                reason="tenant_mismatch",
+                detail="X-Tenant-ID header must be present and match body tenant_id",
+            ).model_dump(),
+        )
+
+    # 2. Check trusted public key registry
     registered_key = await _get_registered_key(body.tenant_id)
     if registered_key is None:
+        await _store_rejection(
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="unknown_collector",
+        )
         return JSONResponse(
             status_code=400,
             content=IngestRejected(
@@ -147,27 +154,34 @@ async def ingest_event(
             ).model_dump(),
         )
 
-    # ── Step 3: Public key match (request key must equal registered key) ──
+    # 3. Request public key match
     if not keys_match(rcpt.public_key, registered_key):
         await _store_rejection(
-            evt.event_id, body.tenant_id, evt.source_host, evt.event_type,
-            evt.timestamp, "untrusted_key", False, False,
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="untrusted_key",
         )
         return JSONResponse(
             status_code=400,
             content=IngestRejected(
                 reason="untrusted_key",
-                detail="receipt.public_key does not match the registered trusted key for this tenant",
+                detail="receipt.public_key does not match registered trusted key",
             ).model_dump(),
         )
 
-    # ── Step 4: SHA-256 hash verification ─────────────────────────────────
+    # 4. SHA-256 hash verification
     event_dict = evt.model_dump()
-    hash_ok = verify_hash(event_dict, rcpt.payload_hash)
-    if not hash_ok:
+    if not verify_hash(event_dict, rcpt.payload_hash):
         await _store_rejection(
-            evt.event_id, body.tenant_id, evt.source_host, evt.event_type,
-            evt.timestamp, "hash_mismatch", False, False,
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="hash_mismatch",
         )
         return JSONResponse(
             status_code=400,
@@ -177,17 +191,20 @@ async def ingest_event(
             ).model_dump(),
         )
 
-    # ── Step 5: Ed25519 signature verification (tenant-bound) ─────────────
-    sig_ok = verify_signature(
+    # 5. Ed25519 signature verification (domain separated)
+    if not verify_signature(
         tenant_id=body.tenant_id,
         payload_hash_hex=rcpt.payload_hash,
         signature_b64=rcpt.signature,
         registered_pubkey_b64=registered_key,
-    )
-    if not sig_ok:
+    ):
         await _store_rejection(
-            evt.event_id, body.tenant_id, evt.source_host, evt.event_type,
-            evt.timestamp, "invalid_signature", True, False,
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="invalid_signature",
         )
         return JSONResponse(
             status_code=400,
@@ -197,26 +214,41 @@ async def ingest_event(
             ).model_dump(),
         )
 
-    # ── Step 6: Duplicate detection (pre-check) ───────────────────────────
-    if await is_duplicate(evt.event_id):
+    # 6. Duplicate detection pre-check
+    if await is_duplicate(body.tenant_id, evt.event_id):
+        await _store_rejection(
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="duplicate_event",
+        )
         return JSONResponse(
             status_code=409,
             content=IngestRejected(
                 reason="duplicate_event",
-                detail="event_id already ingested",
+                detail="event_id already ingested for this tenant",
             ).model_dump(),
         )
 
-    # ── Step 7: Store accepted event (DB UNIQUE constraint catches races) ──
+    # 7. Store accepted event with DB constraint handling
     try:
         ingested_at = await _store_accepted(body)
     except aiosqlite.IntegrityError:
-        # Concurrent duplicate slipped past the pre-check
+        await _store_rejection(
+            tenant_id=body.tenant_id,
+            event_id=evt.event_id,
+            source_host=evt.source_host,
+            event_type=evt.event_type,
+            timestamp=evt.timestamp,
+            reason="duplicate_event",
+        )
         return JSONResponse(
             status_code=409,
             content=IngestRejected(
                 reason="duplicate_event",
-                detail="event_id already ingested (concurrent submission)",
+                detail="event_id already ingested for this tenant (concurrent duplicate)",
             ).model_dump(),
         )
 
