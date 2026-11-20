@@ -69,3 +69,4 @@ pytest tests/ -v
 
 ### Dashboard
 Open `http://localhost:8000/dashboard` after backend is running.
+
