@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 
 from backend.aiops.correlator import correlate_anomalies
 from backend.aiops.detector import AnomalySignal, evaluate_metric
+from backend.aiops.freshness import determine_health_status, evaluate_freshness
 from backend.aiops.metrics import extract_metrics
 from backend.aiops.schemas import (
     AIOpsOverviewResponse,
@@ -54,10 +55,23 @@ async def get_aiops_overview(
         ) as cursor:
             rows = await cursor.fetchall()
 
+        async with db.execute(
+            """
+            SELECT MAX(ingested_at) FROM events WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        ) as cursor:
+            max_row = await cursor.fetchone()
+            latest_ingested_at = max_row[0] if max_row and max_row[0] else None
+
     if not rows:
         return AIOpsOverviewResponse(
             tenant_id=tenant_id,
             health_status="no_data",
+            metric_health="no_data",
+            telemetry_freshness="no_data",
+            last_seen_timestamp=None,
+            last_seen_age_seconds=None,
             hosts_monitored=0,
             events_analyzed=0,
             anomaly_count=0,
@@ -67,6 +81,13 @@ async def get_aiops_overview(
             anomalies=[],
             incidents=[],
         )
+
+    # Fallback if MAX(ingested_at) was empty but rows exist
+    if not latest_ingested_at:
+        latest_ingested_at = rows[-1]["ingested_at"] or rows[-1]["timestamp"]
+
+    # Evaluate tenant-level telemetry freshness from the latest ingested_at timestamp
+    telemetry_freshness, last_seen_age = evaluate_freshness(latest_ingested_at)
 
     # Rolling history: host -> metric_name -> list of float values
     metric_history: Dict[str, Dict[str, List[float]]] = {}
@@ -152,9 +173,11 @@ async def get_aiops_overview(
         for inc in raw_incidents
     ]
 
-    # Build latest host metrics list
+    # Build latest host metrics list with per-host freshness evaluation
     latest_metrics_list = []
     for host, m_dict in latest_per_host.items():
+        h_ts = latest_ts_per_host.get(host)
+        h_freshness, h_age = evaluate_freshness(h_ts)
         latest_metrics_list.append(
             LatestHostMetric(
                 source_host=host,
@@ -164,21 +187,30 @@ async def get_aiops_overview(
                 network_latency_ms=m_dict.get("network_latency_ms"),
                 packet_loss_pct=m_dict.get("packet_loss_pct"),
                 failed_login_count=m_dict.get("failed_login_count"),
-                latest_timestamp=latest_ts_per_host.get(host, _now_utc()),
+                latest_timestamp=h_ts or _now_utc(),
+                freshness=h_freshness,
+                age_seconds=h_age,
             )
         )
 
-    # Determine overall health status
+    # Determine metric-specific health (healthy | degraded | critical)
     if any(inc["severity"] == "CRITICAL" for inc in raw_incidents):
-        overall_health = "critical"
+        metric_health = "critical"
     elif any(inc["severity"] in {"HIGH", "MEDIUM"} for inc in raw_incidents) or anomaly_items:
-        overall_health = "degraded"
+        metric_health = "degraded"
     else:
-        overall_health = "healthy"
+        metric_health = "healthy"
+
+    # Composite infrastructure health: must NOT report healthy if telemetry is stale or very stale
+    health_status = determine_health_status(metric_health, telemetry_freshness)
 
     return AIOpsOverviewResponse(
         tenant_id=tenant_id,
-        health_status=overall_health,
+        health_status=health_status,
+        metric_health=metric_health,
+        telemetry_freshness=telemetry_freshness,
+        last_seen_timestamp=latest_ingested_at,
+        last_seen_age_seconds=last_seen_age,
         hosts_monitored=len(metric_history),
         events_analyzed=len(rows),
         anomaly_count=len(anomaly_items),
@@ -188,3 +220,4 @@ async def get_aiops_overview(
         anomalies=anomaly_items,
         incidents=incident_items,
     )
+

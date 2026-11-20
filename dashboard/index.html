@@ -1155,13 +1155,22 @@
         </div>
 
         <!-- A. AIOps Overview KPI -->
-        <div class="kpi-grid-5">
+        <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-top">
               <span class="kpi-label">Infra Health</span>
               <span class="kpi-tag" id="aiops-health-tag">STATUS</span>
             </div>
             <div class="kpi-value" style="font-size:18px;text-transform:uppercase;" id="aiops-health-val">—</div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Telemetry Stream</span>
+              <span class="kpi-tag" id="aiops-freshness-tag">FRESHNESS</span>
+            </div>
+            <div class="kpi-value" style="font-size:16px;text-transform:uppercase;" id="aiops-freshness-val">—</div>
+            <div style="font-size:11px;color:var(--text-secondary);font-family:var(--font-mono);margin-top:2px;" id="aiops-freshness-detail">—</div>
           </div>
 
           <div class="kpi-card">
@@ -1419,6 +1428,17 @@ async function apiFetch(path) {
   return resp.json();
 }
 
+function formatAge(seconds) {
+  if (seconds == null || isNaN(seconds)) return 'no telemetry';
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (mins < 60) return `${mins}m ${secs}s ago`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `${hours}h ${remMins}m ago`;
+}
+
 async function loadHealth() {
   try {
     const resp = await fetch('/api/v1/health');
@@ -1504,28 +1524,68 @@ async function loadTenantData() {
     // ─────────────────────────────────────────────────────────────
     // AIOps Intelligence Section Rendering
     // ─────────────────────────────────────────────────────────────
-    const healthBadge = document.getElementById('aiops-health-badge');
     const healthVal = document.getElementById('aiops-health-val');
     const healthTag = document.getElementById('aiops-health-tag');
 
-    healthVal.textContent = aiops.health_status;
-    if (aiops.health_status === 'healthy') {
+    // Overall Infrastructure Health Status
+    const hStatus = aiops.health_status || 'no_data';
+    healthVal.textContent = hStatus.replace('_', ' ');
+
+    if (hStatus === 'healthy') {
       healthVal.style.color = 'var(--status-success)';
       healthTag.className = 'kpi-tag badge-success';
       healthTag.textContent = 'HEALTHY';
-    } else if (aiops.health_status === 'critical') {
+    } else if (hStatus === 'critical') {
       healthVal.style.color = 'var(--status-error)';
       healthTag.className = 'kpi-tag badge-error';
       healthTag.textContent = 'CRITICAL';
-    } else if (aiops.health_status === 'degraded') {
+    } else if (hStatus === 'degraded') {
       healthVal.style.color = 'var(--status-warning)';
       healthTag.className = 'kpi-tag badge-warning';
       healthTag.textContent = 'DEGRADED';
+    } else if (hStatus === 'stale') {
+      healthVal.style.color = '#D97706';
+      healthTag.className = 'kpi-tag badge-warning';
+      healthTag.textContent = 'STALE';
+    } else if (hStatus === 'very_stale') {
+      healthVal.style.color = 'var(--status-error)';
+      healthTag.className = 'kpi-tag badge-error';
+      healthTag.textContent = 'VERY STALE';
     } else {
-      healthVal.style.color = 'var(--status-neutral)';
+      healthVal.style.color = 'var(--text-secondary)';
       healthTag.className = 'kpi-tag badge-neutral';
       healthTag.textContent = 'NO DATA';
     }
+
+    // Telemetry Stream Freshness & Last Seen Age
+    const freshnessVal = document.getElementById('aiops-freshness-val');
+    const freshnessTag = document.getElementById('aiops-freshness-tag');
+    const freshnessDetail = document.getElementById('aiops-freshness-detail');
+
+    const freshnessCategory = aiops.telemetry_freshness || 'no_data';
+    freshnessVal.textContent = freshnessCategory.replace('_', ' ');
+
+    if (freshnessCategory === 'fresh') {
+      freshnessVal.style.color = 'var(--status-success)';
+      freshnessTag.className = 'kpi-tag badge-success';
+      freshnessTag.textContent = 'FRESH (<2m)';
+    } else if (freshnessCategory === 'stale') {
+      freshnessVal.style.color = '#D97706';
+      freshnessTag.className = 'kpi-tag badge-warning';
+      freshnessTag.textContent = 'STALE (2-10m)';
+    } else if (freshnessCategory === 'very_stale') {
+      freshnessVal.style.color = 'var(--status-error)';
+      freshnessTag.className = 'kpi-tag badge-error';
+      freshnessTag.textContent = 'VERY STALE (>10m)';
+    } else {
+      freshnessVal.style.color = 'var(--text-secondary)';
+      freshnessTag.className = 'kpi-tag badge-neutral';
+      freshnessTag.textContent = 'NO DATA';
+    }
+
+    freshnessDetail.textContent = aiops.last_seen_age_seconds != null
+      ? `Last seen: ${formatAge(aiops.last_seen_age_seconds)}`
+      : 'No events received';
 
     document.getElementById('aiops-hosts-val').textContent = aiops.hosts_monitored;
     document.getElementById('aiops-events-val').textContent = aiops.events_analyzed;
@@ -1585,7 +1645,28 @@ async function loadTenantData() {
 
         const tdTs = document.createElement('td');
         tdTs.className = 'mono-id';
-        tdTs.textContent = (m.latest_timestamp || '').replace('T', ' ').replace('Z', '');
+        tdTs.style.whiteSpace = 'nowrap';
+        const tsText = document.createTextNode((m.latest_timestamp || '').replace('T', ' ').replace('Z', '') + ' ');
+        tdTs.appendChild(tsText);
+
+        if (m.freshness) {
+          const freshChip = document.createElement('span');
+          freshChip.className = 'badge';
+          if (m.freshness === 'fresh') {
+            freshChip.classList.add('badge-success');
+            freshChip.textContent = 'Fresh';
+          } else if (m.freshness === 'stale') {
+            freshChip.classList.add('badge-warning');
+            freshChip.textContent = m.age_seconds != null ? formatAge(m.age_seconds) : 'Stale';
+          } else if (m.freshness === 'very_stale') {
+            freshChip.classList.add('badge-error');
+            freshChip.textContent = m.age_seconds != null ? formatAge(m.age_seconds) : 'Very Stale';
+          }
+          freshChip.style.marginLeft = '4px';
+          freshChip.style.fontSize = '10px';
+          freshChip.style.padding = '1px 5px';
+          tdTs.appendChild(freshChip);
+        }
         tr.appendChild(tdTs);
 
         metricsBody.appendChild(tr);

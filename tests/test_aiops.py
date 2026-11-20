@@ -6,10 +6,16 @@ incident correlation, explainable recommendations, and API authorization.
 import asyncio
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 import aiosqlite
 import pytest
 from backend.aiops.correlator import correlate_anomalies
 from backend.aiops.detector import AnomalySignal, evaluate_metric
+from backend.aiops.freshness import (
+    calculate_age_seconds,
+    determine_health_status,
+    evaluate_freshness,
+)
 from backend.aiops.metrics import extract_metrics
 from backend.aiops.recommendations import generate_recommendation
 from backend.config import DB_PATH
@@ -249,3 +255,243 @@ async def test_aiops_overview_end_to_end_computation(client, ed25519_keypair, te
     assert inc["severity"] == "CRITICAL"
     assert len(inc["contributing_signals"]) >= 2
     assert len(inc["suggested_recommendation"]) > 10
+
+
+# ── Telemetry Freshness Tests ────────────────────────────────────────────
+
+def test_freshness_evaluation_unit_thresholds():
+    """Verify fresh (<2m), stale (2-10m), very stale (>10m), and no_data categories."""
+    now = datetime(2026, 11, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Empty / None / invalid timestamp
+    assert evaluate_freshness(None, now=now) == ("no_data", None)
+    assert evaluate_freshness("", now=now) == ("no_data", None)
+    assert evaluate_freshness("invalid-iso-string", now=now) == ("no_data", None)
+
+    # Fresh: < 120s (e.g. 30s ago, 119s ago)
+    t_30s = (now - timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_30s, now=now)
+    assert cat == "fresh"
+    assert round(age) == 30
+
+    t_119s = (now - timedelta(seconds=119)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_119s, now=now)
+    assert cat == "fresh"
+    assert round(age) == 119
+
+    # Stale: 2m to 10m (120s to 600s)
+    t_120s = (now - timedelta(seconds=120)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_120s, now=now)
+    assert cat == "stale"
+    assert round(age) == 120
+
+    t_5m = (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_5m, now=now)
+    assert cat == "stale"
+    assert round(age) == 300
+
+    t_10m = (now - timedelta(seconds=600)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_10m, now=now)
+    assert cat == "stale"
+    assert round(age) == 600
+
+    # Very Stale: > 10m (> 600s)
+    t_11m = (now - timedelta(minutes=11)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_11m, now=now)
+    assert cat == "very_stale"
+    assert round(age) == 660
+
+    # 57 minutes ago (the exact bug scenario)
+    t_57m = (now - timedelta(minutes=57)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cat, age = evaluate_freshness(t_57m, now=now)
+    assert cat == "very_stale"
+    assert round(age) == 3420
+
+
+def test_determine_health_status_unit_matrix():
+    """Verify composite health distinguishing metric health from freshness."""
+    # When metrics are healthy:
+    assert determine_health_status("healthy", "fresh") == "healthy"
+    assert determine_health_status("healthy", "stale") == "stale"
+    assert determine_health_status("healthy", "very_stale") == "very_stale"
+
+    # When metrics are degraded or critical, alarms take precedence:
+    assert determine_health_status("degraded", "fresh") == "degraded"
+    assert determine_health_status("degraded", "stale") == "degraded"
+    assert determine_health_status("critical", "fresh") == "critical"
+    assert determine_health_status("critical", "very_stale") == "critical"
+
+    # When either is no_data:
+    assert determine_health_status("no_data", "fresh") == "no_data"
+    assert determine_health_status("healthy", "no_data") == "no_data"
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_empty_telemetry_freshness_fields(client):
+    """Empty tenant exposes no_data freshness and None age."""
+    new_tenant = str(uuid.uuid4())
+    token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(new_tenant, token)
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={new_tenant}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["health_status"] == "no_data"
+    assert data["metric_health"] == "no_data"
+    assert data["telemetry_freshness"] == "no_data"
+    assert data["last_seen_timestamp"] is None
+    assert data["last_seen_age_seconds"] is None
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_telemetry_fresh_reports_healthy(client, ed25519_keypair):
+    """Normal telemetry ingested moments ago evaluates as fresh and healthy."""
+    private_key, pub_b64 = ed25519_keypair
+    isolated_tenant = str(uuid.uuid4())
+    isolated_token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(isolated_tenant, isolated_token)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO trusted_keys (tenant_id, public_key_b64, collector_name) VALUES (?, ?, ?)",
+            (isolated_tenant, pub_b64, "collector-fresh-test"),
+        )
+        await db.commit()
+
+    test_host = f"fresh-worker-{uuid.uuid4().hex[:6]}"
+
+    event = build_valid_event(
+        private_key, pub_b64, isolated_tenant,
+        source_host=test_host,
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 25.0, "ram_pct": 40.0},
+    )
+    r = await client.post("/api/v1/ingest", json=event, headers={"X-Tenant-ID": isolated_tenant})
+    assert r.status_code == 202
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={isolated_tenant}",
+        headers={"Authorization": f"Bearer {isolated_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["metric_health"] == "healthy"
+    assert data["telemetry_freshness"] == "fresh"
+    assert data["health_status"] == "healthy"
+    assert data["last_seen_age_seconds"] is not None
+    assert data["last_seen_age_seconds"] < 120.0
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_telemetry_stale_reports_stale_not_healthy(client, ed25519_keypair):
+    """
+    Telemetry 5 minutes old with zero anomalies must report stale, NOT healthy.
+    Distinguishes metric_health ('healthy') from telemetry_freshness ('stale').
+    """
+    private_key, pub_b64 = ed25519_keypair
+    isolated_tenant = str(uuid.uuid4())
+    isolated_token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(isolated_tenant, isolated_token)
+
+    # Register trusted key for this tenant
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO trusted_keys (tenant_id, public_key_b64, collector_name) VALUES (?, ?, ?)",
+            (isolated_tenant, pub_b64, "collector-stale-test"),
+        )
+        await db.commit()
+
+    event = build_valid_event(
+        private_key, pub_b64, isolated_tenant,
+        source_host="stale-host-01",
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 25.0, "ram_pct": 35.0},
+    )
+    r = await client.post("/api/v1/ingest", json=event, headers={"X-Tenant-ID": isolated_tenant})
+    assert r.status_code == 202
+
+    # Simulate 5 minutes elapsed on ingested_at
+    stale_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE events SET ingested_at = ? WHERE tenant_id = ?",
+            (stale_ts, isolated_tenant),
+        )
+        await db.commit()
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={isolated_tenant}",
+        headers={"Authorization": f"Bearer {isolated_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["metric_health"] == "healthy"
+    assert data["telemetry_freshness"] == "stale"
+    # Crucial requirement: Must NOT report healthy!
+    assert data["health_status"] == "stale"
+    assert data["health_status"] != "healthy"
+    assert data["last_seen_age_seconds"] is not None
+    assert 250.0 <= data["last_seen_age_seconds"] <= 350.0
+
+
+@pytest.mark.asyncio
+async def test_aiops_overview_telemetry_fifty_seven_minutes_old_reports_very_stale(client, ed25519_keypair):
+    """
+    Direct reproduction of the reported issue:
+    Telemetry event is ~57 minutes old with zero anomalies.
+    Platform must NOT report HEALTHY; it must report very_stale.
+    """
+    private_key, pub_b64 = ed25519_keypair
+    isolated_tenant = str(uuid.uuid4())
+    isolated_token = f"tok-{uuid.uuid4().hex[:8]}"
+    await register_tenant_token(isolated_tenant, isolated_token)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO trusted_keys (tenant_id, public_key_b64, collector_name) VALUES (?, ?, ?)",
+            (isolated_tenant, pub_b64, "collector-57m-test"),
+        )
+        await db.commit()
+
+    event = build_valid_event(
+        private_key, pub_b64, isolated_tenant,
+        source_host="silent-host-01",
+        event_id=str(uuid.uuid4()),
+        custom_payload={"cpu_pct": 20.0, "ram_pct": 30.0},
+    )
+    r = await client.post("/api/v1/ingest", json=event, headers={"X-Tenant-ID": isolated_tenant})
+    assert r.status_code == 202
+
+    # Simulate 57 minutes elapsed on ingested_at
+    fifty_seven_mins_ago = (datetime.now(timezone.utc) - timedelta(minutes=57)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE events SET ingested_at = ? WHERE tenant_id = ?",
+            (fifty_seven_mins_ago, isolated_tenant),
+        )
+        await db.commit()
+
+    resp = await client.get(
+        f"/api/v1/aiops/overview?tenant_id={isolated_tenant}",
+        headers={"Authorization": f"Bearer {isolated_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["metric_health"] == "healthy"
+    assert data["telemetry_freshness"] == "very_stale"
+    # Crucial requirement: Must NOT report healthy!
+    assert data["health_status"] == "very_stale"
+    assert data["health_status"] != "healthy"
+    assert data["last_seen_age_seconds"] is not None
+    assert data["last_seen_age_seconds"] > 3000.0  # ~3420 seconds
+
+    # Check that host metrics also carry freshness
+    host_metric = data["latest_metrics"][0]
+    assert host_metric["freshness"] == "very_stale"
+    assert host_metric["age_seconds"] > 3000.0

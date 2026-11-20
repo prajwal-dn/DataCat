@@ -18,6 +18,13 @@ APP_TITLE = "DataCat SaaS Platform"
 # Ingest limits
 MAX_PAYLOAD_BYTES = 1_048_576  # 1 MB hard limit on raw request body
 
+# Telemetry Freshness Thresholds (in seconds)
+# Fresh: < 2 minutes (120s)
+# Stale: 2 to 10 minutes (120s - 600s)
+# Very Stale: > 10 minutes (> 600s)
+FRESHNESS_FRESH_MAX_SECONDS = int(os.getenv("DATACAT_FRESHNESS_FRESH_MAX_SECONDS", "120"))
+FRESHNESS_STALE_MAX_SECONDS = int(os.getenv("DATACAT_FRESHNESS_STALE_MAX_SECONDS", "600"))
+
 # Dashboard
 EVENTS_DEFAULT_LIMIT = 50
 EVENTS_MAX_LIMIT = 500

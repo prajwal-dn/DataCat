@@ -14,6 +14,8 @@ class LatestHostMetric(BaseModel):
     packet_loss_pct: Optional[float] = None
     failed_login_count: Optional[float] = None
     latest_timestamp: str
+    freshness: Optional[str] = "fresh"  # fresh | stale | very_stale | no_data
+    age_seconds: Optional[float] = None
 
 
 class AnomalyItem(BaseModel):
@@ -45,7 +47,11 @@ class IncidentItem(BaseModel):
 
 class AIOpsOverviewResponse(BaseModel):
     tenant_id: str
-    health_status: str  # healthy | degraded | critical | no_data
+    health_status: str  # healthy | degraded | critical | stale | very_stale | no_data
+    metric_health: str  # healthy | degraded | critical | no_data
+    telemetry_freshness: str  # fresh | stale | very_stale | no_data
+    last_seen_timestamp: Optional[str] = None
+    last_seen_age_seconds: Optional[float] = None
     hosts_monitored: int
     events_analyzed: int
     anomaly_count: int
@@ -54,3 +60,4 @@ class AIOpsOverviewResponse(BaseModel):
     latest_metrics: List[LatestHostMetric]
     anomalies: List[AnomalyItem]
     incidents: List[IncidentItem]
+
