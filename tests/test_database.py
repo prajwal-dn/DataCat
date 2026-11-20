@@ -97,3 +97,4 @@ async def test_rejection_audit_schema_no_sensitive_columns():
     assert "rejected_reason" in columns
     assert "event_id" in columns
     assert "tenant_id" in columns
+

@@ -10,7 +10,8 @@
 - Protocol: HTTPS (HTTP for local dev)
 - Base URL: `http://localhost:8000` (dev) / `https://api.datacat.io` (prod)
 - Content-Type: `application/json`
-- Auth: `X-Tenant-ID` header (UUID string) on all requests
+- Ingest Auth: `X-Tenant-ID` header (UUID string) on `POST /api/v1/ingest`
+- Dashboard Auth: `Authorization: Bearer <tenant_api_token>` or `X-API-Key: <tenant_api_token>` on `GET /api/v1/*` endpoints
 
 ---
 
@@ -37,7 +38,7 @@ Collector sends a verified telemetry event plus its cryptographic receipt.
   },
   "receipt": {
     "payload_hash": "hex-encoded SHA-256 of canonical JSON of event object",
-    "signature": "base64-encoded Ed25519 signature over payload_hash bytes",
+    "signature": "base64-encoded Ed25519 signature over UTF-8 bytes: DATACAT-INGEST-V1:{tenant_id}:{payload_hash}",
     "public_key": "base64-encoded Ed25519 public key (32 bytes)",
     "signed_at": "ISO-8601 UTC string"
   }
@@ -215,23 +216,26 @@ Both collector and backend MUST use this exact function.
 
 ## Ed25519 Signing Specification
 
+To prevent cross-tenant replay attacks and ensure cryptographic domain separation, both collector and backend MUST sign and verify over the exact domain-separated UTF-8 bytes:
+
 ```python
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-import base64, hashlib
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.exceptions import InvalidSignature
+import base64
+
+# Deterministic domain-separated message
+# Format: DATACAT-INGEST-V1:{tenant_id}:{payload_hash_hex}
+message = f"DATACAT-INGEST-V1:{tenant_id}:{payload_hash_hex.lower()}".encode("utf-8")
 
 # Signing (collector side)
-payload_hash_bytes = bytes.fromhex(payload_hash_hex)
-signature_bytes = private_key.sign(payload_hash_bytes)
-signature_b64 = base64.b64encode(signature_bytes).decode()
+signature_bytes = private_key.sign(message)
+signature_b64 = base64.b64encode(signature_bytes).decode("utf-8")
 
 # Verifying (backend side)
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from cryptography.exceptions import InvalidSignature
-
 public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
 try:
-    public_key.verify(base64.b64decode(signature_b64), bytes.fromhex(payload_hash_hex))
+    public_key.verify(base64.b64decode(signature_b64), message)
     # valid
 except InvalidSignature:
     # reject

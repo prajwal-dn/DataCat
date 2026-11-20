@@ -1,12 +1,13 @@
 """
 GET /api/v1/incidents — audit of rejected events from rejection_audit.
-Tenant isolation rule: tenant_id is strictly required. Never returns cross-tenant data.
+Enforces tenant authentication and isolation.
 """
 import aiosqlite
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 
 from backend.config import DB_PATH
 from backend.models import IncidentRecord, IncidentsResponse
+from backend.auth import require_tenant_auth
 
 router = APIRouter()
 
@@ -17,12 +18,13 @@ _REASON_TO_TYPE = {
     "unknown_collector": "unknown_collector",
     "duplicate_event": "duplicate",
     "tenant_mismatch": "tenant_mismatch",
+    "payload_too_large": "payload_too_large",
 }
 
 
 @router.get("/incidents", response_model=IncidentsResponse)
 async def get_incidents(
-    tenant_id: str = Query(..., min_length=1, description="Tenant ID is required for isolation"),
+    tenant_id: str = Depends(require_tenant_auth),
     limit: int = Query(default=100, ge=1, le=500),
 ):
     async with aiosqlite.connect(DB_PATH) as db:

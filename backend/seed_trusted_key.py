@@ -1,37 +1,30 @@
 """
 seed_trusted_key.py — One-time setup helper.
 
-Registers a collector's Ed25519 public key into the trusted_keys table.
+Registers a collector's Ed25519 public key and optional dashboard API token into the database.
 Run this BEFORE any collector sends events to the backend.
 
 Usage:
     python backend/seed_trusted_key.py \\
         --tenant-id  <uuid>              \\
         --pubkey-b64 <base64-encoded-key>  \\
+        --api-token  <secret-dashboard-token> \\
         --name       "My Collector"
-
-Or supply the public key as a file:
-    python backend/seed_trusted_key.py \\
-        --tenant-id  <uuid>              \\
-        --pubkey-file keys/collector.pub
-
-The file should contain the raw base64 string (one line, no PEM headers).
-Private keys MUST remain on the collector machine. Never pass them here.
 """
 import argparse
 import asyncio
+import secrets
 import sys
 from pathlib import Path
 
-# Allow running from repo root: python backend/seed_trusted_key.py
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import aiosqlite
 from backend.config import DB_PATH
-from backend.database import init_db
+from backend.database import init_db, register_tenant_token
 
 
-async def seed(tenant_id: str, pubkey_b64: str, name: str) -> None:
+async def seed(tenant_id: str, pubkey_b64: str, name: str, api_token: str) -> None:
     await init_db()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -46,14 +39,20 @@ async def seed(tenant_id: str, pubkey_b64: str, name: str) -> None:
             (tenant_id, pubkey_b64.strip(), name),
         )
         await db.commit()
-    print(f"[OK] Registered public key for tenant={tenant_id} name='{name}'")
+
+    await register_tenant_token(tenant_id, api_token)
+
+    print(f"[OK] Registered public key for tenant={tenant_id} (name='{name}')")
+    print(f"[OK] Registered dashboard API token for tenant={tenant_id}")
+    print(f"     Token: {api_token}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Register a trusted collector public key")
+    parser = argparse.ArgumentParser(description="Register a trusted collector public key and API token")
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--pubkey-b64", default=None, help="Base64 public key string")
     parser.add_argument("--pubkey-file", default=None, help="File containing base64 public key")
+    parser.add_argument("--api-token", default=None, help="Dashboard API token (generated if omitted)")
     parser.add_argument("--name", default="default-collector")
     args = parser.parse_args()
 
@@ -64,9 +63,9 @@ def main() -> None:
     else:
         parser.error("Provide either --pubkey-b64 or --pubkey-file")
 
-    asyncio.run(seed(args.tenant_id, key, args.name))
+    token = args.api_token or secrets.token_urlsafe(32)
+    asyncio.run(seed(args.tenant_id, key, args.name, token))
 
 
 if __name__ == "__main__":
     main()
-

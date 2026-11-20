@@ -22,7 +22,7 @@ _tmp_db.close()
 os.environ["DATACAT_DB_PATH"] = _tmp_db.name
 
 from backend.main import app
-from backend.database import init_db, DB_PATH
+from backend.database import init_db, DB_PATH, register_tenant_token
 from backend.verification.hash_verify import canonical_hash
 from backend.verification.signature_verify import compute_signing_message
 
@@ -42,9 +42,14 @@ def tenant_id():
     return str(uuid.uuid4())
 
 
+@pytest.fixture(scope="session")
+def tenant_token():
+    return "test-dashboard-token-secret"
+
+
 @pytest_asyncio.fixture(scope="session", autouse=True)
-async def setup_db(ed25519_keypair, tenant_id):
-    """Init schema and register trusted key for the test session."""
+async def setup_db(ed25519_keypair, tenant_id, tenant_token):
+    """Init schema and register trusted key and token for the test session."""
     await init_db()
     _, pub_b64 = ed25519_keypair
     async with aiosqlite.connect(DB_PATH) as db:
@@ -53,6 +58,8 @@ async def setup_db(ed25519_keypair, tenant_id):
             (tenant_id, pub_b64, "test-collector"),
         )
         await db.commit()
+
+    await register_tenant_token(tenant_id, tenant_token)
 
 
 @pytest_asyncio.fixture
@@ -71,6 +78,7 @@ def build_valid_event(
     tamper_signature: bool = False,
     wrong_tenant_in_sig: str = None,
     wrong_pubkey_b64: str = None,
+    source_host: str = "test-host-01",
 ) -> dict:
     """
     Build a valid ingest request dict with domain-separated signature.
@@ -79,7 +87,7 @@ def build_valid_event(
     event = {
         "event_id": event_id,
         "timestamp": "2026-11-20T14:00:00Z",
-        "source_host": "test-host-01",
+        "source_host": source_host,
         "event_type": event_type,
         "payload": {"cpu_pct": 42.5, "mem_mb": 1024},
         "privacy_tags": ["pii_removed"],

@@ -1,20 +1,21 @@
 """
 GET /api/v1/events — paginated event list from the database.
-Tenant isolation rule: tenant_id is strictly required. Never returns cross-tenant data.
+Enforces tenant authentication and isolation.
 """
 from typing import Optional
 import aiosqlite
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, Depends
 
 from backend.config import DB_PATH, EVENTS_DEFAULT_LIMIT, EVENTS_MAX_LIMIT
 from backend.models import EventRecord, EventsResponse
+from backend.auth import require_tenant_auth
 
 router = APIRouter()
 
 
 @router.get("/events", response_model=EventsResponse)
 async def get_events(
-    tenant_id: str = Query(..., min_length=1, description="Tenant ID is required for isolation"),
+    tenant_id: str = Depends(require_tenant_auth),
     limit: int = Query(default=EVENTS_DEFAULT_LIMIT, ge=1, le=EVENTS_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
 ):

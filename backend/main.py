@@ -3,17 +3,15 @@ DataCat — FastAPI application entry point.
 """
 import time
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pathlib import Path
 
-from backend.config import APP_VERSION, APP_TITLE
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+
+from backend.config import APP_VERSION, APP_TITLE, MAX_PAYLOAD_BYTES
 from backend.database import init_db
 from backend.routers import ingest, events, stats, incidents, health as health_router
 
-# Track startup time for /health uptime calculation
 _START_TIME = time.monotonic()
 
 
@@ -29,6 +27,28 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def enforce_payload_size_limit(request: Request, call_next):
+    """Enforce MAX_PAYLOAD_BYTES hard limit on all incoming requests."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_PAYLOAD_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "status": "rejected",
+                        "reason": "payload_too_large",
+                        "detail": f"Payload size exceeds the limit of {MAX_PAYLOAD_BYTES} bytes",
+                    },
+                )
+        except ValueError:
+            pass
+
+    return await call_next(request)
+
 
 # ----- API routers -----
 app.include_router(ingest.router, prefix="/api/v1", tags=["ingest"])
@@ -46,6 +66,4 @@ async def serve_dashboard():
     return FileResponse(DASHBOARD_DIR / "index.html")
 
 
-# Expose start time for health endpoint
 app.state.start_time = _START_TIME
-

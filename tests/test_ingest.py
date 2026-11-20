@@ -2,13 +2,15 @@
 Tests for POST /api/v1/ingest.
 
 All tests use real cryptographic operations (Ed25519 & SHA-256).
-Verifies rejection handling, privacy guarantees, tenant consistency, and concurrency.
+Verifies rejection handling, privacy guarantees, tenant consistency, concurrency,
+request size limits, and sanitization of rejection audits.
 """
 import asyncio
+import json
 import uuid
 import aiosqlite
 import pytest
-from backend.config import DB_PATH
+from backend.config import DB_PATH, MAX_PAYLOAD_BYTES
 from tests.conftest import build_valid_event
 
 pytestmark = pytest.mark.asyncio
@@ -53,7 +55,6 @@ async def test_ingest_concurrent_duplicates(client, ed25519_keypair, tenant_id):
     shared_id = str(uuid.uuid4())
     body = build_valid_event(private_key, pub_b64, tenant_id, event_id=shared_id)
 
-    # Fire 5 concurrent requests with identical event_id
     tasks = [
         client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
         for _ in range(5)
@@ -161,6 +162,60 @@ async def test_ingest_missing_required_fields(client, tenant_id):
     assert resp.status_code == 422
 
 
+async def test_ingest_payload_size_limit_exceeded(client, ed25519_keypair, tenant_id):
+    """Request exceeding MAX_PAYLOAD_BYTES is rejected with 413."""
+    private_key, pub_b64 = ed25519_keypair
+    body = build_valid_event(private_key, pub_b64, tenant_id)
+    # Inflate body with large string > 1 MB
+    body["event"]["payload"]["bloat"] = "X" * (MAX_PAYLOAD_BYTES + 1024)
+
+    raw_json = json.dumps(body)
+    resp = await client.post(
+        "/api/v1/ingest",
+        content=raw_json,
+        headers={"X-Tenant-ID": tenant_id, "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 413
+    assert resp.json()["reason"] == "payload_too_large"
+
+
+async def test_rejection_audit_sanitization(client, ed25519_keypair, tenant_id):
+    """
+    Malicious or non-standard characters in rejection metadata (e.g. XSS payloads)
+    must be strictly filtered and sanitized before writing to rejection_audit.
+    """
+    private_key, pub_b64 = ed25519_keypair
+    raw_bad_event_id = "evt-<script>alert('xss')</script>-123"
+    raw_bad_host = "host'; DROP TABLE events; --"
+    raw_bad_type = "type<img src=x onerror=alert(1)>"
+
+    body = build_valid_event(
+        private_key,
+        pub_b64,
+        tenant_id,
+        event_id=raw_bad_event_id,
+        event_type=raw_bad_type,
+        source_host=raw_bad_host,
+        tamper_signature=True,
+    )
+
+    resp = await client.post("/api/v1/ingest", json=body, headers={"X-Tenant-ID": tenant_id})
+    assert resp.status_code == 400
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM rejection_audit WHERE tenant_id = ? ORDER BY id DESC LIMIT 1",
+            (tenant_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            assert row is not None
+            # Verify script tags and SQL injection strings are filtered out
+            assert "<script>" not in row["event_id"]
+            assert "DROP TABLE" not in row["source_host"]
+            assert "<img" not in row["event_type"]
+
+
 async def test_rejected_data_privacy(client, ed25519_keypair, tenant_id):
     """
     Privacy verification:
@@ -191,7 +246,6 @@ async def test_rejected_data_privacy(client, ed25519_keypair, tenant_id):
             assert audit_row is not None
             assert audit_row["rejected_reason"] == "hash_mismatch"
             assert audit_row["tenant_id"] == tenant_id
-            # Verify no payload columns exist in table info
             columns = audit_row.keys()
             assert "payload" not in columns
             assert "signature" not in columns
