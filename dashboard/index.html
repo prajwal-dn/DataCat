@@ -3,153 +3,1235 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DataCat — Privacy-First Observability</title>
+<title>DataCat — Privacy Observability Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d1117; --surface: #161b22; --border: #30363d;
-    --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922;
-    --purple: #bc8cff;
+    --bg-main: #F4F4F1;
+    --bg-card: #FFFFFF;
+    --sidebar-bg: #151515;
+    --sidebar-border: #222222;
+    --sidebar-text: #EEEEEE;
+    --sidebar-muted: #7E7E7E;
+    --sidebar-hover: #1D1D1D;
+    --sidebar-active: #262626;
+
+    --text-primary: #181818;
+    --text-secondary: #777777;
+    --text-muted: #969690;
+    --border-color: #E5E5E0;
+    --border-subtle: #EEEEEC;
+
+    --status-success: #1E7E34;
+    --status-success-bg: #EDF7EE;
+    --status-success-border: #CBE6CE;
+
+    --status-error: #C5221F;
+    --status-error-bg: #FDF0EE;
+    --status-error-border: #F9CFCA;
+
+    --status-warning: #996400;
+    --status-warning-bg: #FFF8E6;
+    --status-warning-border: #F7E4A8;
+
+    --status-neutral: #50565E;
+    --status-neutral-bg: #F1F3F5;
+    --status-neutral-border: #DDE2E6;
+
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, "Liberation Mono", Menlo, Courier, monospace;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03);
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
   }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; font-size: 14px; }
 
-  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
-  header h1 { font-size: 18px; color: var(--accent); letter-spacing: 1px; }
-  header .meta { color: var(--muted); font-size: 12px; display: flex; gap: 16px; align-items: center; }
-  #status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
-  #status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  #status-dot.degraded { background: var(--yellow); }
-  #status-dot.error { background: var(--red); }
-
-  main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
-
-  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; background: var(--surface); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); }
-  .toolbar label { color: var(--muted); font-size: 12px; font-weight: 600; }
-  input[type=text], input[type=password] {
-    background: var(--bg); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 6px 12px; font-size: 13px; outline: none; width: 260px;
+  html {
+    scroll-behavior: smooth;
+    background-color: var(--bg-main);
   }
-  input:focus { border-color: var(--accent); }
-  button.refresh {
-    background: var(--accent); color: #000; border: none; border-radius: 6px;
-    padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600;
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    display: flex;
   }
-  button.refresh:hover { opacity: 0.85; }
-  #auto-label { color: var(--muted); font-size: 12px; margin-left: auto; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-  .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .card .value { font-size: 28px; font-weight: 700; }
-  .card.green .value { color: var(--green); }
-  .card.red .value { color: var(--red); }
-  .card.yellow .value { color: var(--yellow); }
-  .card.purple .value { color: var(--purple); }
-  .card.blue .value { color: var(--accent); }
+  /* Technical Grid Background */
+  .grid-bg {
+    background-color: var(--bg-main);
+    background-image: 
+      linear-gradient(to right, rgba(0, 0, 0, 0.032) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.032) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: -1px -1px;
+  }
 
-  .section { margin-bottom: 28px; }
-  .section h2 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  /* Icons */
+  .icon {
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    stroke-width: 1.75;
+    stroke: currentColor;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: middle;
+  }
+  .icon-sm { width: 13px; height: 13px; }
+  .icon-lg { width: 18px; height: 18px; }
 
-  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: var(--surface); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  td { padding: 10px 12px; border-bottom: 1px solid #21262d; font-size: 13px; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #1c2128; }
-  .mono { font-family: monospace; font-size: 12px; color: var(--muted); }
+  /* Left Sidebar */
+  aside.sidebar {
+    width: 240px;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+  }
 
-  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
-  .badge.fail { background: rgba(248,81,73,.15); color: var(--red); }
-  .badge.warn { background: rgba(210,153,34,.15); color: var(--yellow); }
-  .badge.dup { background: rgba(188,140,255,.15); color: var(--purple); }
+  .sidebar-brand {
+    padding: 20px 20px 18px;
+    border-bottom: 1px solid var(--sidebar-border);
+  }
 
-  .incident-list { display: flex; flex-direction: column; gap: 8px; }
-  .incident-item { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--red); border-radius: 6px; padding: 12px; display: flex; gap: 12px; align-items: flex-start; }
-  .incident-item.dup { border-left-color: var(--purple); }
-  .incident-item.hash { border-left-color: var(--yellow); }
-  .incident-meta { flex: 1; }
-  .incident-meta .eid { font-family: monospace; font-size: 11px; color: var(--muted); }
-  .incident-time { font-size: 11px; color: var(--muted); }
+  .brand-logo-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-  .pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
-  .pagination button { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
-  .pagination button:disabled { opacity: 0.4; cursor: default; }
+  .brand-name {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--sidebar-text);
+    text-transform: uppercase;
+  }
 
-  .loading { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
-  .empty-banner { background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; padding: 30px; text-align: center; color: var(--muted); margin-bottom: 20px; }
-  .auth-error { color: var(--red); font-size: 13px; margin-top: 8px; display: none; }
+  .brand-pill {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: #A3A3A3;
+    background: #222222;
+    padding: 2px 5px;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.04em;
+  }
+
+  .brand-sub {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sidebar-muted);
+    margin-top: 4px;
+    font-family: var(--font-mono);
+  }
+
+  .sidebar-nav {
+    padding: 16px 10px;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .nav-group-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555555;
+    font-weight: 600;
+    padding: 8px 10px 4px;
+    font-family: var(--font-mono);
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    color: var(--sidebar-muted);
+    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: color 0.15s ease, background 0.15s ease;
+    margin-bottom: 2px;
+    cursor: pointer;
+  }
+
+  .nav-item:hover {
+    color: var(--sidebar-text);
+    background: var(--sidebar-hover);
+  }
+
+  .nav-item.active {
+    color: #FFFFFF;
+    background: var(--sidebar-active);
+    font-weight: 600;
+  }
+
+  .nav-item .icon {
+    color: inherit;
+    opacity: 0.8;
+  }
+
+  .sidebar-footer {
+    padding: 14px 16px;
+    border-top: 1px solid var(--sidebar-border);
+    font-size: 11px;
+    color: var(--sidebar-muted);
+    font-family: var(--font-mono);
+  }
+
+  .sidebar-tenant-badge {
+    background: #1C1C1C;
+    border: 1px solid #2B2B2B;
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #D4D4D0;
+    margin-top: 6px;
+  }
+
+  .sidebar-tenant-id {
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Main View Layout */
+  .main-wrapper {
+    margin-left: 240px;
+    flex: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* Top Header */
+  header.top-header {
+    height: 52px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 90;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .header-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
+
+  .header-divider {
+    color: var(--border-color);
+    font-weight: 300;
+  }
+
+  .header-crumb {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+
+  .header-meta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: #F9F9F7;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+
+  .status-dot.ok {
+    background: var(--status-success);
+    box-shadow: 0 0 0 2px rgba(30, 126, 52, 0.15);
+  }
+
+  .status-dot.error {
+    background: var(--status-error);
+    box-shadow: 0 0 0 2px rgba(197, 34, 31, 0.15);
+  }
+
+  .header-timestamp {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* Content Area */
+  main.content {
+    padding: 24px 28px 48px;
+    max-width: 1440px;
+    width: 100%;
+    margin: 0 auto;
+    flex: 1;
+  }
+
+  /* Connection & Auth Strip */
+  .auth-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .auth-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .auth-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .input-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+  }
+
+  input[type="text"], input[type="password"] {
+    background: #FAFAF8;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 12.5px;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  input[type="text"]:focus, input[type="password"]:focus {
+    border-color: #888884;
+    background: #FFFFFF;
+  }
+
+  #tenant-input { width: 300px; }
+  #token-input { width: 230px; }
+
+  button.btn-primary {
+    background: #181818;
+    color: #FFFFFF;
+    border: 1px solid #181818;
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+
+  button.btn-primary:hover {
+    background: #2B2B2B;
+  }
+
+  button.btn-secondary {
+    background: #FFFFFF;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 5px 10px;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  button.btn-secondary:hover {
+    background: #F8F8F6;
+    border-color: #D2D2CC;
+  }
+
+  .auth-status-chip {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .auth-error {
+    color: var(--status-error);
+    background: var(--status-error-bg);
+    border: 1px solid var(--status-error-border);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    font-size: 12px;
+    margin-top: 10px;
+    display: none;
+    font-family: var(--font-mono);
+  }
+
+  /* Empty State Prompt */
+  .empty-console {
+    background: var(--bg-card);
+    border: 1px dashed #D6D6D0;
+    border-radius: var(--radius-lg);
+    padding: 48px 24px;
+    text-align: center;
+    margin-top: 16px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .empty-icon-wrap {
+    width: 44px;
+    height: 44px;
+    background: #F4F4F1;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+
+  .empty-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+
+  .empty-desc {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    max-width: 420px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  /* Section Headers */
+  .section-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .section-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .section-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  /* Section A — Overview KPI Cards */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .kpi-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 14px 12px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 84px;
+  }
+
+  .kpi-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .kpi-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .kpi-tag {
+    font-size: 9px;
+    font-family: var(--font-mono);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
+
+  .kpi-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    margin-top: 6px;
+    font-family: var(--font-sans);
+  }
+
+  .kpi-accepted .kpi-value { color: var(--status-success); }
+  .kpi-rejected .kpi-value { color: var(--status-error); }
+  .kpi-hash .kpi-value { color: var(--status-warning); }
+  .kpi-sig .kpi-value { color: var(--status-error); }
+  .kpi-dup .kpi-value { color: var(--status-neutral); }
+
+  /* Section B — Transmission Integrity Banner */
+  .integrity-strip {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-card);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr;
+    gap: 20px;
+    align-items: center;
+  }
+
+  .integrity-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .integrity-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .integrity-metric {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .integrity-bar-wrap {
+    background: #EBEBE6;
+    height: 5px;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 3px;
+  }
+
+  .integrity-bar-fill {
+    height: 100%;
+    background: var(--status-success);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  .protocol-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+  }
+
+  .protocol-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: #F4F4F1;
+    border: 1px solid var(--border-color);
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* Section C & D — Content Tables */
+  .table-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+  }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 12.5px;
+  }
+
+  table.data-table th {
+    background: #FAFAF8;
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+  }
+
+  table.data-table td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+
+  table.data-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  table.data-table tr:hover td {
+    background: #FAF9F6;
+  }
+
+  /* Badges & Indicators */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    font-size: 10.5px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+  }
+
+  .badge-success {
+    background: var(--status-success-bg);
+    color: var(--status-success);
+    border: 1px solid var(--status-success-border);
+  }
+
+  .badge-error {
+    background: var(--status-error-bg);
+    color: var(--status-error);
+    border: 1px solid var(--status-error-border);
+  }
+
+  .badge-warning {
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
+    border: 1px solid var(--status-warning-border);
+  }
+
+  .badge-neutral {
+    background: var(--status-neutral-bg);
+    color: var(--status-neutral);
+    border: 1px solid var(--status-neutral-border);
+  }
+
+  .mono-id {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-secondary);
+  }
+
+  .mono-type {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: #F5F5F2;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    color: #404040;
+    border: 1px solid #E6E6E1;
+  }
+
+  /* Pagination Bar */
+  .table-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    background: #FAFAF8;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .pagination-info {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+
+  .pagination-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .pagination-buttons button {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .pagination-buttons button:hover:not(:disabled) {
+    background: #F4F4F1;
+  }
+
+  .pagination-buttons button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Section D — Rejection Incident List */
+  .incident-list-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+
+  .incident-row {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--status-error);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .incident-row.reason-hash {
+    border-left-color: var(--status-warning);
+  }
+  .incident-row.reason-dup {
+    border-left-color: var(--status-neutral);
+  }
+
+  .incident-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .incident-header-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .incident-id {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .incident-meta-line {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .incident-time {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* Section E — Platform Status */
+  .platform-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    box-shadow: var(--shadow-card);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+
+  .platform-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .platform-item-title {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .platform-item-val {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .loading-cell {
+    padding: 28px 14px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+
+  /* Responsive Rules */
+  @media (max-width: 1180px) {
+    .kpi-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .integrity-strip {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .platform-card {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 860px) {
+    aside.sidebar {
+      position: static;
+      width: 100%;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--sidebar-border);
+    }
+    body {
+      flex-direction: column;
+    }
+    .main-wrapper {
+      margin-left: 0;
+    }
+    .kpi-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    #tenant-input, #token-input {
+      width: 100%;
+    }
+    .auth-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .auth-status-chip {
+      margin-left: 0;
+    }
+    .platform-card {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
 </head>
-<body>
+<body class="grid-bg">
 
-<header>
-  <h1>🐱 DataCat</h1>
-  <div class="meta">
-    <span><span id="status-dot"></span> <span id="platform-status">connecting…</span></span>
-    <span>v<span id="platform-version">—</span></span>
-    <span>Uptime: <span id="platform-uptime">—</span></span>
-    <span id="last-refresh"></span>
-  </div>
-</header>
-
-<main>
-  <div class="toolbar">
-    <label for="tenant-input">Tenant ID:</label>
-    <input type="text" id="tenant-input" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" />
-    <label for="token-input">API Token:</label>
-    <input type="password" id="token-input" placeholder="Secret Dashboard Token" />
-    <button class="refresh" onclick="onTenantApply()">Connect Dashboard</button>
-    <span id="auto-label">Auth: Bearer Token</span>
-    <div id="auth-error-msg" class="auth-error" style="width:100%;"></div>
-  </div>
-
-  <div id="tenant-prompt" class="empty-banner">
-    Please enter your Tenant ID and API Token above to authenticate and view verified telemetry.
-  </div>
-
-  <div id="dashboard-content" style="display:none;">
-    <div class="cards">
-      <div class="card blue"><div class="label">Total Events</div><div class="value" id="c-total">0</div></div>
-      <div class="card green"><div class="label">Accepted</div><div class="value" id="c-accepted">0</div></div>
-      <div class="card red"><div class="label">Rejected</div><div class="value" id="c-rejected">0</div></div>
-      <div class="card yellow"><div class="label">Hash Failures</div><div class="value" id="c-hash">0</div></div>
-      <div class="card red"><div class="label">Sig Failures</div><div class="value" id="c-sig">0</div></div>
-      <div class="card purple"><div class="label">Duplicates</div><div class="value" id="c-dup">0</div></div>
+<!-- Left Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-logo-row">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" style="color:#58A6FF;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      <span class="brand-name">DATACAT</span>
+      <span class="brand-pill">v1.0</span>
     </div>
+    <div class="brand-sub">Privacy Observability</div>
+  </div>
 
-    <div class="section">
-      <h2>Verified Transmissions</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Event ID</th>
-              <th>Type</th>
-              <th>Host</th>
-              <th>Hash Verified</th>
-              <th>Sig Verified</th>
-              <th>Status</th>
-              <th>Ingested At</th>
-            </tr>
-          </thead>
-          <tbody id="events-body"><tr><td colspan="7" class="loading">Loading…</td></tr></tbody>
-        </table>
+  <nav class="sidebar-nav">
+    <div class="nav-group-title">Console</div>
+    <a class="nav-item active" href="#sec-overview" onclick="setActiveNav(this)">
+      <svg class="icon" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+      Overview
+    </a>
+    <a class="nav-item" href="#sec-transmissions" onclick="setActiveNav(this)">
+      <svg class="icon" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Transmissions
+    </a>
+    <a class="nav-item" href="#sec-audit" onclick="setActiveNav(this)">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+      Privacy Audit
+    </a>
+    <a class="nav-item" href="#sec-audit" onclick="setActiveNav(this)">
+      <svg class="icon" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+      Security Incidents
+    </a>
+    <a class="nav-item" href="#sec-status" onclick="setActiveNav(this)">
+      <svg class="icon" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+      Platform Status
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:#555;">Active Workspace</div>
+    <div class="sidebar-tenant-badge">
+      <span class="sidebar-tenant-id" id="sidebar-tenant-label">No Tenant Connected</span>
+      <svg class="icon icon-sm" viewBox="0 0 24 24" style="color:#777;"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    </div>
+  </div>
+</aside>
+
+<!-- Main Wrapper -->
+<div class="main-wrapper">
+  <!-- Top Header -->
+  <header class="top-header">
+    <div class="header-left">
+      <span class="header-title">Observability Console</span>
+      <span class="header-divider">/</span>
+      <span class="header-crumb" id="header-workspace-crumb">isolated-tenant</span>
+    </div>
+    <div class="header-meta">
+      <div class="status-indicator">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="platform-status">connecting…</span>
       </div>
-      <div class="pagination">
-        <button id="btn-prev" onclick="prevPage()" disabled>← Prev</button>
-        <span id="page-info" style="color:var(--muted);font-size:12px;">—</span>
-        <button id="btn-next" onclick="nextPage()">Next →</button>
+      <span>v<span id="platform-version">—</span></span>
+      <span class="header-timestamp" id="last-refresh">—</span>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="content">
+
+    <!-- Auth Strip -->
+    <div class="auth-panel">
+      <div class="auth-row">
+        <div class="input-group">
+          <span class="auth-label">Tenant ID:</span>
+          <input type="text" id="tenant-input" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" spellcheck="false" />
+        </div>
+        <div class="input-group">
+          <span class="auth-label">API Token:</span>
+          <input type="password" id="token-input" placeholder="••••••••••••••••" />
+        </div>
+        <button class="btn-primary" onclick="onTenantApply()">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+          Connect
+        </button>
+        <button class="btn-secondary" onclick="disconnectTenant()" title="Clear credentials" style="display:none;" id="btn-disconnect">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          Disconnect
+        </button>
+        <div class="auth-status-chip" id="auto-label">
+          <svg class="icon icon-sm" viewBox="0 0 24 24" style="color:var(--status-success);"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+          Sync: 10s
+        </div>
+      </div>
+      <div id="auth-error-msg" class="auth-error"></div>
+    </div>
+
+    <!-- Empty State Prompt -->
+    <div id="tenant-prompt" class="empty-console">
+      <div class="empty-icon-wrap">
+        <svg class="icon icon-lg" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <div class="empty-title">Authentication Required</div>
+      <div class="empty-desc">
+        Enter your registered Tenant UUID and Dashboard API Token above to inspect cryptographically verified transmissions and security audit logs.
       </div>
     </div>
 
-    <div class="section">
-      <h2>Sanitized Rejection &amp; Incident Audit</h2>
-      <div id="incidents-container" class="incident-list"><div class="loading">Loading…</div></div>
+    <!-- Authenticated Dashboard -->
+    <div id="dashboard-content" style="display:none;">
+
+      <!-- Section A — Overview KPI Cards -->
+      <section id="sec-overview" style="margin-bottom: 24px;">
+        <div class="section-header">
+          <div class="section-title">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/></svg>
+            Transmission Telemetry
+          </div>
+          <div class="section-sub">Tenant-Scoped Metrics</div>
+        </div>
+
+        <div class="kpi-grid">
+          <!-- Total -->
+          <div class="kpi-card">
+            <div class="kpi-top">
+              <span class="kpi-label">Total Transmissions</span>
+              <span class="kpi-tag" style="background:#EAEAEA;color:#555;">ALL</span>
+            </div>
+            <div class="kpi-value" id="c-total">0</div>
+          </div>
+          <!-- Accepted -->
+          <div class="kpi-card kpi-accepted">
+            <div class="kpi-top">
+              <span class="kpi-label">Accepted</span>
+              <span class="kpi-tag badge-success">VERIFIED</span>
+            </div>
+            <div class="kpi-value" id="c-accepted">0</div>
+          </div>
+          <!-- Rejected -->
+          <div class="kpi-card kpi-rejected">
+            <div class="kpi-top">
+              <span class="kpi-label">Rejected</span>
+              <span class="kpi-tag badge-error">BLOCKED</span>
+            </div>
+            <div class="kpi-value" id="c-rejected">0</div>
+          </div>
+          <!-- Hash Failures -->
+          <div class="kpi-card kpi-hash">
+            <div class="kpi-top">
+              <span class="kpi-label">Hash Failures</span>
+              <span class="kpi-tag badge-warning">SHA-256</span>
+            </div>
+            <div class="kpi-value" id="c-hash">0</div>
+          </div>
+          <!-- Sig Failures -->
+          <div class="kpi-card kpi-sig">
+            <div class="kpi-top">
+              <span class="kpi-label">Sig Failures</span>
+              <span class="kpi-tag badge-error">Ed25519</span>
+            </div>
+            <div class="kpi-value" id="c-sig">0</div>
+          </div>
+          <!-- Duplicates -->
+          <div class="kpi-card kpi-dup">
+            <div class="kpi-top">
+              <span class="kpi-label">Duplicates</span>
+              <span class="kpi-tag badge-neutral">DEDUP</span>
+            </div>
+            <div class="kpi-value" id="c-dup">0</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section B — Transmission Integrity -->
+      <div class="integrity-strip">
+        <div class="integrity-col">
+          <span class="integrity-label">Ingestion Acceptance Rate</span>
+          <div class="integrity-metric">
+            <span id="rate-acceptance-val">—</span>
+            <span style="font-size:11px;font-weight:500;color:var(--text-secondary);" id="rate-acceptance-ratio">(0 / 0)</span>
+          </div>
+          <div class="integrity-bar-wrap">
+            <div class="integrity-bar-fill" id="rate-acceptance-bar"></div>
+          </div>
+        </div>
+
+        <div class="integrity-col">
+          <span class="integrity-label">Cryptographic Verification</span>
+          <div class="integrity-metric">
+            <span id="rate-crypto-val">—</span>
+            <span style="font-size:11px;font-weight:500;color:var(--text-secondary);">integrity pass</span>
+          </div>
+          <div class="integrity-bar-wrap">
+            <div class="integrity-bar-fill" id="rate-crypto-bar" style="background:#2E7D32;"></div>
+          </div>
+        </div>
+
+        <div class="integrity-col">
+          <span class="integrity-label">Verification Envelope</span>
+          <div class="protocol-tags">
+            <span class="protocol-chip"><svg class="icon icon-sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Canonical SHA-256</span>
+            <span class="protocol-chip"><svg class="icon icon-sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Domain Ed25519</span>
+            <span class="protocol-chip"><svg class="icon icon-sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> DB-Level Dedup</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section C — Recent Verified Transmissions -->
+      <section id="sec-transmissions" style="margin-bottom: 24px;">
+        <div class="section-header">
+          <div class="section-title">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Verified Transmissions
+          </div>
+          <div class="section-sub">Events Passing Ingestion Pipeline</div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Event Identifier</th>
+                  <th>Event Type</th>
+                  <th>Source Host</th>
+                  <th>SHA-256 Hash</th>
+                  <th>Ed25519 Sig</th>
+                  <th>Status</th>
+                  <th>Ingested (UTC)</th>
+                </tr>
+              </thead>
+              <tbody id="events-body">
+                <tr><td colspan="7" class="loading-cell">Loading verified transmissions…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-pagination">
+            <span class="pagination-info" id="page-info">Page 1</span>
+            <div class="pagination-buttons">
+              <button id="btn-prev" onclick="prevPage()" disabled>← Previous</button>
+              <button id="btn-next" onclick="nextPage()">Next →</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section D — Privacy and Security Audit -->
+      <section id="sec-audit" style="margin-bottom: 24px;">
+        <div class="section-header">
+          <div class="section-title">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Privacy &amp; Security Rejection Audit
+          </div>
+          <div class="section-sub">Sanitized Metadata Only · Zero Raw Payload Leakage</div>
+        </div>
+
+        <div id="incidents-container" class="incident-list-wrap">
+          <div class="loading-cell" style="background:#fff;border:1px solid var(--border-color);border-radius:var(--radius-md);">
+            Loading audit records…
+          </div>
+        </div>
+      </section>
+
+      <!-- Section E — Platform Status -->
+      <section id="sec-status">
+        <div class="section-header">
+          <div class="section-title">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/></svg>
+            Platform Health &amp; Runtime State
+          </div>
+          <div class="section-sub">SaaS Host Infrastructure</div>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-item">
+            <span class="platform-item-title">Backend Status</span>
+            <span class="platform-item-val" id="plat-health-status">
+              <span class="status-dot ok"></span>
+              <span>Online</span>
+            </span>
+          </div>
+
+          <div class="platform-item">
+            <span class="platform-item-title">Database Storage</span>
+            <span class="platform-item-val" id="plat-db-status">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              <span id="hb-db">Connected</span>
+            </span>
+          </div>
+
+          <div class="platform-item">
+            <span class="platform-item-title">Platform Uptime</span>
+            <span class="platform-item-val" id="platform-uptime">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>0s</span>
+            </span>
+          </div>
+
+          <div class="platform-item">
+            <span class="platform-item-title">Ingest Endpoint</span>
+            <span class="platform-item-val" style="font-size:12px;color:var(--text-secondary);">
+              POST /api/v1/ingest
+            </span>
+          </div>
+        </div>
+      </section>
+
     </div>
-  </div>
-</main>
+  </main>
+</div>
 
 <script>
 let currentPage = 0;
@@ -159,9 +1241,33 @@ let activeToken = localStorage.getItem('datacat_api_token') || '';
 
 if (activeTenant) {
   document.getElementById('tenant-input').value = activeTenant;
+  updateTenantLabel(activeTenant);
 }
 if (activeToken) {
   document.getElementById('token-input').value = activeToken;
+}
+
+function updateTenantLabel(tid) {
+  const lbl = document.getElementById('sidebar-tenant-label');
+  const crumb = document.getElementById('header-workspace-crumb');
+  const disBtn = document.getElementById('btn-disconnect');
+  if (tid) {
+    lbl.textContent = tid.slice(0, 14) + '…';
+    lbl.title = tid;
+    crumb.textContent = tid.slice(0, 8);
+    disBtn.style.display = 'inline-flex';
+  } else {
+    lbl.textContent = 'No Tenant Connected';
+    crumb.textContent = 'isolated-tenant';
+    disBtn.style.display = 'none';
+  }
+}
+
+function setActiveNav(el) {
+  document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  el.classList.add('active');
 }
 
 async function apiFetch(path) {
@@ -172,7 +1278,7 @@ async function apiFetch(path) {
   const resp = await fetch(path, { headers });
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
-    const err = new Error(errBody.detail?.message || `HTTP ${resp.status}`);
+    const err = new Error(errBody.detail?.message || errBody.detail || `HTTP ${resp.status}`);
     err.status = resp.status;
     throw err;
   }
@@ -184,13 +1290,28 @@ async function loadHealth() {
     const resp = await fetch('/api/v1/health');
     const h = await resp.json();
     const dot = document.getElementById('status-dot');
-    dot.className = h.status === 'ok' ? 'ok' : 'error';
-    document.getElementById('platform-status').textContent = h.status;
-    document.getElementById('platform-version').textContent = h.version;
+    const platStatus = document.getElementById('platform-status');
+    const platHealth = document.getElementById('plat-health-status');
+
+    if (h.status === 'ok') {
+      dot.className = 'status-dot ok';
+      platStatus.textContent = 'healthy';
+      if (platHealth) platHealth.innerHTML = '<span class="status-dot ok"></span> Online';
+    } else {
+      dot.className = 'status-dot error';
+      platStatus.textContent = 'degraded';
+      if (platHealth) platHealth.innerHTML = '<span class="status-dot error"></span> Degraded';
+    }
+
+    document.getElementById('platform-version').textContent = h.version || '1.0.0';
     const up = Math.floor(h.uptime_seconds);
-    document.getElementById('platform-uptime').textContent = `${up}s`;
+    const uptimeStr = up >= 3600 
+      ? `${Math.floor(up/3600)}h ${Math.floor((up%3600)/60)}m`
+      : `${up}s`;
+    document.getElementById('platform-uptime').textContent = uptimeStr;
+    document.getElementById('hb-db').textContent = h.db || 'Connected';
   } catch(e) {
-    document.getElementById('status-dot').className = 'error';
+    document.getElementById('status-dot').className = 'status-dot error';
     document.getElementById('platform-status').textContent = 'offline';
   }
 }
@@ -208,6 +1329,7 @@ async function loadTenantData() {
   if (!activeTenant || !activeToken) {
     document.getElementById('tenant-prompt').style.display = 'block';
     document.getElementById('dashboard-content').style.display = 'none';
+    updateTenantLabel('');
     return;
   }
 
@@ -221,7 +1343,9 @@ async function loadTenantData() {
 
     document.getElementById('tenant-prompt').style.display = 'none';
     document.getElementById('dashboard-content').style.display = 'block';
+    updateTenantLabel(activeTenant);
 
+    // Section A: Statistics KPI
     document.getElementById('c-total').textContent = stats.total_events;
     document.getElementById('c-accepted').textContent = stats.accepted;
     document.getElementById('c-rejected').textContent = stats.rejected;
@@ -229,6 +1353,20 @@ async function loadTenantData() {
     document.getElementById('c-sig').textContent = stats.signature_failures;
     document.getElementById('c-dup').textContent = stats.duplicate_rejections;
 
+    // Section B: Integrity metrics
+    const total = stats.total_events;
+    const accepted = stats.accepted;
+    const acceptRate = total > 0 ? Math.round((accepted / total) * 100) : 100;
+    document.getElementById('rate-acceptance-val').textContent = `${acceptRate}%`;
+    document.getElementById('rate-acceptance-ratio').textContent = `(${accepted} / ${total})`;
+    document.getElementById('rate-acceptance-bar').style.width = `${acceptRate}%`;
+
+    const cryptoFails = stats.hash_failures + stats.signature_failures;
+    const cryptoPassRate = total > 0 ? Math.round(((total - cryptoFails) / total) * 100) : 100;
+    document.getElementById('rate-crypto-val').textContent = `${cryptoPassRate}%`;
+    document.getElementById('rate-crypto-bar').style.width = `${cryptoPassRate}%`;
+
+    // Section C: Transmissions Table (Safe DOM insertion)
     const tbody = document.getElementById('events-body');
     clearElement(tbody);
 
@@ -236,53 +1374,62 @@ async function loadTenantData() {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
       td.colSpan = 7;
-      td.className = 'loading';
-      td.textContent = 'No events recorded for this tenant.';
+      td.className = 'loading-cell';
+      td.textContent = 'No verified events recorded for this tenant.';
       tr.appendChild(td);
       tbody.appendChild(tr);
     } else {
       events.events.forEach(e => {
         const tr = document.createElement('tr');
 
+        // Event ID
         const tdId = document.createElement('td');
-        tdId.className = 'mono';
-        tdId.textContent = (e.event_id || '').slice(0, 8) + '…';
+        tdId.className = 'mono-id';
+        tdId.textContent = (e.event_id || '').slice(0, 12) + '…';
+        tdId.title = e.event_id || '';
         tr.appendChild(tdId);
 
+        // Type
         const tdType = document.createElement('td');
         const spanType = document.createElement('span');
-        spanType.className = 'mono';
-        spanType.textContent = e.event_type || '';
+        spanType.className = 'mono-type';
+        spanType.textContent = e.event_type || 'unspecified';
         tdType.appendChild(spanType);
         tr.appendChild(tdType);
 
+        // Host
         const tdHost = document.createElement('td');
-        tdHost.textContent = e.source_host || '';
+        tdHost.className = 'mono-id';
+        tdHost.textContent = e.source_host || 'unknown';
         tr.appendChild(tdHost);
 
+        // Hash
         const tdHash = document.createElement('td');
         const spanHash = document.createElement('span');
-        spanHash.className = 'badge ok';
+        spanHash.className = 'badge badge-success';
         spanHash.textContent = '✓ Verified';
         tdHash.appendChild(spanHash);
         tr.appendChild(tdHash);
 
+        // Signature
         const tdSig = document.createElement('td');
         const spanSig = document.createElement('span');
-        spanSig.className = 'badge ok';
+        spanSig.className = 'badge badge-success';
         spanSig.textContent = '✓ Verified';
         tdSig.appendChild(spanSig);
         tr.appendChild(tdSig);
 
+        // Status
         const tdStatus = document.createElement('td');
         const spanStatus = document.createElement('span');
-        spanStatus.className = 'badge ok';
-        spanStatus.textContent = '✓ Accepted';
+        spanStatus.className = 'badge badge-success';
+        spanStatus.textContent = 'Accepted';
         tdStatus.appendChild(spanStatus);
         tr.appendChild(tdStatus);
 
+        // Time
         const tdTime = document.createElement('td');
-        tdTime.className = 'mono';
+        tdTime.className = 'mono-id';
         tdTime.textContent = (e.ingested_at || '').replace('T', ' ').replace('Z', '');
         tr.appendChild(tdTime);
 
@@ -290,64 +1437,84 @@ async function loadTenantData() {
       });
     }
 
-    const totalPages = Math.max(1, Math.ceil(events.total / PAGE_SIZE));
-    document.getElementById('page-info').textContent = `Page ${currentPage + 1} of ${totalPages} (${events.total} total)`;
+    // Pagination
+    const totalEvents = events.total || 0;
+    const totalPages = Math.max(1, Math.ceil(totalEvents / PAGE_SIZE));
+    document.getElementById('page-info').textContent = `Page ${currentPage + 1} of ${totalPages} (${totalEvents} events)`;
     document.getElementById('btn-prev').disabled = currentPage === 0;
     document.getElementById('btn-next').disabled = (currentPage + 1) >= totalPages;
 
+    // Section D: Rejections & Incidents (Safe DOM insertion)
     const incContainer = document.getElementById('incidents-container');
     clearElement(incContainer);
 
     if (incidents.incidents.length === 0) {
-      const emptyDiv = document.createElement('div');
-      emptyDiv.className = 'loading';
-      emptyDiv.style.color = 'var(--green)';
-      emptyDiv.textContent = '✓ No rejections or security incidents recorded';
-      incContainer.appendChild(emptyDiv);
+      const okDiv = document.createElement('div');
+      okDiv.className = 'loading-cell';
+      okDiv.style.background = '#FFFFFF';
+      okDiv.style.border = '1px solid var(--border-color)';
+      okDiv.style.borderRadius = 'var(--radius-md)';
+      okDiv.style.color = 'var(--status-success)';
+      okDiv.textContent = '✓ Zero policy violations or rejected transmissions recorded.';
+      incContainer.appendChild(okDiv);
     } else {
       incidents.incidents.forEach(inc => {
-        const item = document.createElement('div');
-        item.className = 'incident-item';
-        if (inc.incident_type === 'duplicate') item.classList.add('dup');
-        else if (inc.incident_type === 'hash_mismatch') item.classList.add('hash');
+        const row = document.createElement('div');
+        row.className = 'incident-row';
+        if (inc.incident_type === 'hash_mismatch') row.classList.add('reason-hash');
+        else if (inc.incident_type === 'duplicate') row.classList.add('reason-dup');
 
-        const meta = document.createElement('div');
-        meta.className = 'incident-meta';
+        const body = document.createElement('div');
+        body.className = 'incident-body';
+
+        const headLine = document.createElement('div');
+        headLine.className = 'incident-header-line';
 
         const badge = document.createElement('span');
-        badge.className = 'badge fail';
-        badge.textContent = inc.incident_type || 'incident';
-        meta.appendChild(badge);
+        badge.className = 'badge';
+        if (inc.incident_type === 'hash_mismatch') badge.classList.add('badge-warning');
+        else if (inc.incident_type === 'duplicate') badge.classList.add('badge-neutral');
+        else badge.classList.add('badge-error');
+        badge.textContent = inc.incident_type || 'rejection';
+        headLine.appendChild(badge);
 
-        const eid = document.createElement('div');
-        eid.className = 'eid';
-        eid.style.marginTop = '4px';
-        eid.textContent = inc.event_id || '';
-        meta.appendChild(eid);
+        const eid = document.createElement('span');
+        eid.className = 'incident-id';
+        eid.textContent = inc.event_id || 'unknown-id';
+        headLine.appendChild(eid);
+        body.appendChild(headLine);
 
-        const hostLine = document.createElement('div');
-        hostLine.style.fontSize = '12px';
-        hostLine.style.marginTop = '2px';
-        hostLine.textContent = `${inc.source_host || 'unknown'} · Detail: ${inc.detail || ''}`;
-        meta.appendChild(hostLine);
+        const metaLine = document.createElement('div');
+        metaLine.className = 'incident-meta-line';
+        
+        const hostSpan = document.createElement('span');
+        hostSpan.className = 'mono-id';
+        hostSpan.textContent = `host: ${inc.source_host || 'unknown'}`;
+        metaLine.appendChild(hostSpan);
 
-        item.appendChild(meta);
+        const detailSpan = document.createElement('span');
+        detailSpan.textContent = `Reason: ${inc.detail || 'unspecified'}`;
+        metaLine.appendChild(detailSpan);
+
+        body.appendChild(metaLine);
+        row.appendChild(body);
 
         const timeDiv = document.createElement('div');
         timeDiv.className = 'incident-time';
         timeDiv.textContent = (inc.timestamp || '').replace('T', ' ').replace('Z', '');
-        item.appendChild(timeDiv);
+        row.appendChild(timeDiv);
 
-        incContainer.appendChild(item);
+        incContainer.appendChild(row);
       });
     }
 
-    document.getElementById('last-refresh').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+    document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
   } catch(e) {
     document.getElementById('tenant-prompt').style.display = 'block';
     document.getElementById('dashboard-content').style.display = 'none';
-    errEl.textContent = `Authentication error: ${e.message}`;
+    errEl.textContent = `Connection failed: ${e.message}`;
     errEl.style.display = 'block';
+    updateTenantLabel('');
   }
 }
 
@@ -363,9 +1530,22 @@ function onTenantApply() {
     loadTenantData();
   } else {
     const errEl = document.getElementById('auth-error-msg');
-    errEl.textContent = 'Both Tenant ID and API Token are required.';
+    errEl.textContent = 'Both Tenant ID and API Token are required to connect.';
     errEl.style.display = 'block';
   }
+}
+
+function disconnectTenant() {
+  activeTenant = '';
+  activeToken = '';
+  localStorage.removeItem('datacat_tenant_id');
+  localStorage.removeItem('datacat_api_token');
+  document.getElementById('tenant-input').value = '';
+  document.getElementById('token-input').value = '';
+  document.getElementById('auth-error-msg').style.display = 'none';
+  document.getElementById('tenant-prompt').style.display = 'block';
+  document.getElementById('dashboard-content').style.display = 'none';
+  updateTenantLabel('');
 }
 
 function prevPage() { if (currentPage > 0) { currentPage--; loadTenantData(); } }
@@ -373,7 +1553,10 @@ function nextPage() { currentPage++; loadTenantData(); }
 
 loadHealth();
 if (activeTenant && activeToken) { loadTenantData(); }
-setInterval(() => { loadHealth(); if (activeTenant && activeToken) loadTenantData(); }, 10000);
+setInterval(() => {
+  loadHealth();
+  if (activeTenant && activeToken) { loadTenantData(); }
+}, 10000);
 </script>
 </body>
 </html>
