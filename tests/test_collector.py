@@ -552,6 +552,27 @@ class TestTransmission:
         assert result.success is False
         assert result.error == "connect_error"
 
+    def test_unexpected_error_does_not_expose_exception_details(
+        self, collector_tenant_id, caplog
+    ):
+        """Unexpected exception details must not appear in logs or result."""
+        envelope = self._make_envelope(collector_tenant_id)
+        sensitive_message = "secret-token-and-private-url"
+
+        with patch("collector.transport.sender.httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.side_effect = RuntimeError(sensitive_message)
+            mock_client_class.return_value = mock_client
+
+            result = transmit(envelope, collector_tenant_id)
+
+        assert result.success is False
+        assert result.error == "unexpected_error"
+        assert sensitive_message not in caplog.text
+        assert sensitive_message not in str(result)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Integration Pipeline Test
