@@ -68,7 +68,9 @@ def transmit(
 
         body: Dict[str, Any] = {}
         try:
-            body = resp.json()
+            parsed = resp.json()
+            if isinstance(parsed, dict):
+                body = parsed
         except Exception:
             pass
 
@@ -86,8 +88,16 @@ def transmit(
             )
 
         elif resp.status_code == 409:
-            reason = body.get("reason", "duplicate_event")
-            logger.info("Transmission duplicate (409): event_id=%s reason=%s", event_id, reason)
+            raw_reason = body.get("reason")
+            if isinstance(raw_reason, str) and raw_reason.strip():
+                reason = raw_reason.strip()
+            else:
+                reason = "http_409"
+
+            if reason == "duplicate_event":
+                logger.info("Transmission duplicate (409): event_id=%s reason=%s", event_id, reason)
+            else:
+                logger.warning("Transmission conflict (409): event_id=%s reason=%s", event_id, reason)
             return TransmissionResult(
                 success=False,
                 status_code=409,

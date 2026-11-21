@@ -498,6 +498,68 @@ class TestTransmission:
         assert result.status_code == 409
         assert result.response_reason == "duplicate_event"
 
+    def test_other_409_returns_failure(self, collector_tenant_id):
+        """409 with non-duplicate reason produces success=False and preserves reason."""
+        envelope = self._make_envelope(collector_tenant_id)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 409
+        mock_resp.json.return_value = {"status": "rejected", "reason": "state_conflict"}
+
+        with patch("collector.transport.sender.httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_resp
+            mock_client_class.return_value = mock_client
+
+            result = transmit(envelope, collector_tenant_id)
+
+        assert result.success is False
+        assert result.status_code == 409
+        assert result.response_reason == "state_conflict"
+
+    def test_409_missing_reason_defaults_to_http_409(self, collector_tenant_id):
+        """HTTP 409 with missing reason defaults to 'http_409' and is not a duplicate."""
+        envelope = self._make_envelope(collector_tenant_id)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 409
+        mock_resp.json.return_value = {}
+
+        with patch("collector.transport.sender.httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_resp
+            mock_client_class.return_value = mock_client
+
+            result = transmit(envelope, collector_tenant_id)
+
+        assert result.success is False
+        assert result.status_code == 409
+        assert result.response_reason == "http_409"
+        assert result.response_reason != "duplicate_event"
+
+    def test_409_malformed_json_defaults_to_http_409(self, collector_tenant_id):
+        """HTTP 409 with malformed JSON response defaults to 'http_409'."""
+        envelope = self._make_envelope(collector_tenant_id)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 409
+        mock_resp.json.side_effect = ValueError("Invalid JSON")
+
+        with patch("collector.transport.sender.httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_resp
+            mock_client_class.return_value = mock_client
+
+            result = transmit(envelope, collector_tenant_id)
+
+        assert result.success is False
+        assert result.status_code == 409
+        assert result.response_reason == "http_409"
+        assert result.response_reason != "duplicate_event"
+
     def test_rejection_400_returns_failure(self, collector_tenant_id):
         """400 rejection (hash/signature) must produce success=False."""
         envelope = self._make_envelope(collector_tenant_id)
@@ -715,4 +777,153 @@ class TestPrivacyEngineSecurity:
         filtered, tags = filter_payload(payload)
 
         assert filtered["cpu_pct"] == 40.0
-        assert "fields_allowlisted" in tags    
+        assert "fields_allowlisted" in tags
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Collector Execution and Duplicate Handling Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCollectorExecution:
+
+    def test_run_once_accepted_202_returns_true(self, collector_keypair, collector_tenant_id):
+        """HTTP 202 accepted results in run_once returning True."""
+        from collector.collector import run_once
+        success_result = TransmissionResult(
+            success=True,
+            status_code=202,
+            event_id="evt-202",
+            backend_stored_at="2026-11-21T00:00:00Z",
+        )
+        with patch("collector.collector.transmit", return_value=success_result):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is True
+
+    def test_run_once_duplicate_409_returns_true_and_logs_info(
+        self, collector_keypair, collector_tenant_id, caplog
+    ):
+        """HTTP 409 duplicate_event results in run_once returning True and logs at INFO level."""
+        import logging
+        from collector.collector import run_once
+        duplicate_result = TransmissionResult(
+            success=False,
+            status_code=409,
+            event_id="evt-409",
+            response_reason="duplicate_event",
+        )
+        with patch("collector.collector.transmit", return_value=duplicate_result):
+            with caplog.at_level(logging.INFO):
+                outcome = run_once(collector_keypair, collector_tenant_id)
+
+        assert outcome is True
+        assert "Event already exists in backend: event_id=evt-409" in caplog.text
+        # Ensure no WARNING or ERROR was logged for legitimate duplicate
+        warning_or_above = [
+            r for r in caplog.records
+            if r.levelno >= logging.WARNING and "collector" in r.name
+        ]
+        assert len(warning_or_above) == 0
+
+    def test_run_once_other_409_returns_false(self, collector_keypair, collector_tenant_id):
+        """HTTP 409 with non-duplicate reason remains a failure in run_once."""
+        from collector.collector import run_once
+        conflict_result = TransmissionResult(
+            success=False,
+            status_code=409,
+            event_id="evt-conflict",
+            response_reason="state_conflict",
+        )
+        with patch("collector.collector.transmit", return_value=conflict_result):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is False
+
+    def test_run_once_409_missing_reason_returns_false(self, collector_keypair, collector_tenant_id):
+        """HTTP 409 with missing reason defaults to http_409 and returns False in run_once."""
+        from collector.collector import run_once
+        res_missing = TransmissionResult(
+            success=False,
+            status_code=409,
+            event_id="evt-409-missing",
+            response_reason="http_409",
+        )
+        with patch("collector.collector.transmit", return_value=res_missing):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is False
+
+    def test_run_once_409_malformed_response_returns_false(self, collector_keypair, collector_tenant_id):
+        """HTTP 409 with malformed/empty JSON response defaults to http_409 and returns False."""
+        from collector.collector import run_once
+        res_malformed = TransmissionResult(
+            success=False,
+            status_code=409,
+            event_id="evt-409-malformed",
+            response_reason="http_409",
+        )
+        with patch("collector.collector.transmit", return_value=res_malformed):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is False
+
+    def test_run_once_rejection_400_returns_false(self, collector_keypair, collector_tenant_id):
+        """HTTP 400 rejection remains a failure in run_once."""
+        from collector.collector import run_once
+        rejection_result = TransmissionResult(
+            success=False,
+            status_code=400,
+            event_id="evt-rejected",
+            response_reason="hash_mismatch",
+        )
+        with patch("collector.collector.transmit", return_value=rejection_result):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is False
+
+    def test_run_once_timeout_returns_false(self, collector_keypair, collector_tenant_id):
+        """Timeout remains a failure in run_once."""
+        from collector.collector import run_once
+        timeout_result = TransmissionResult(
+            success=False,
+            status_code=0,
+            event_id="evt-timeout",
+            error="timeout",
+        )
+        with patch("collector.collector.transmit", return_value=timeout_result):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is False
+
+    def test_run_once_connect_error_returns_false(self, collector_keypair, collector_tenant_id):
+        """Connect error remains a failure in run_once."""
+        from collector.collector import run_once
+        conn_result = TransmissionResult(
+            success=False,
+            status_code=0,
+            event_id="evt-conn",
+            error="connect_error",
+        )
+        with patch("collector.collector.transmit", return_value=conn_result):
+            outcome = run_once(collector_keypair, collector_tenant_id)
+        assert outcome is False
+
+    def test_main_once_exit_code_zero_on_duplicate(self, monkeypatch):
+        """CLI --once exits with code 0 on duplicate event."""
+        from collector.collector import main
+        monkeypatch.setattr("sys.argv", ["collector", "--once"])
+        monkeypatch.setattr("collector.collector.TENANT_ID", "test-tenant-id")
+        monkeypatch.setattr("collector.collector.Path.exists", lambda self: True)
+        monkeypatch.setattr("collector.collector.load_private_key", lambda path: MagicMock())
+        monkeypatch.setattr("collector.collector.run_once", lambda *args, **kwargs: True)
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    def test_main_once_exit_code_one_on_failure(self, monkeypatch):
+        """CLI --once exits with code 1 on actual transmission failure."""
+        from collector.collector import main
+        monkeypatch.setattr("sys.argv", ["collector", "--once"])
+        monkeypatch.setattr("collector.collector.TENANT_ID", "test-tenant-id")
+        monkeypatch.setattr("collector.collector.Path.exists", lambda self: True)
+        monkeypatch.setattr("collector.collector.load_private_key", lambda path: MagicMock())
+        monkeypatch.setattr("collector.collector.run_once", lambda *args, **kwargs: False)
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 1
