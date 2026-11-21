@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Any, Dict, List, Tuple
 
 from collector.config import MAX_PAYLOAD_BYTES, PII_FIELD_BLOCKLIST
 
 logger = logging.getLogger("datacat.collector.privacy")
+
+# Maximum permitted character length for any metadata string field
+MAX_METADATA_STRING_LEN: int = 256
 
 # ── Allowlisted metric field canonical names ─────────────────────────────────
 # Only these aggregated, non-identifying metrics are permitted to be transmitted.
@@ -81,12 +85,16 @@ PERMITTED_METRIC_FIELDS: set = {
 
 def _is_pii_field(field_name: str) -> bool:
     """Return True if the field name matches any PII blocklist entry (case-insensitive)."""
+    if not isinstance(field_name, str):
+        return False
     lower = field_name.lower()
     return any(blocked in lower for blocked in PII_FIELD_BLOCKLIST)
 
 
 def _is_permitted_field(field_name: str) -> bool:
     """Return True if the field name is in the allowlisted metric set."""
+    if not isinstance(field_name, str):
+        return False
     return field_name.lower() in PERMITTED_METRIC_FIELDS
 
 
@@ -110,36 +118,69 @@ def filter_payload(raw_payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[st
     pii_stripped = False
     fields_dropped = False
 
+    nested_dicts: List[Tuple[str, Dict[str, Any]]] = []
+
+    # Pass 1: Handle non-string keys, PII fields, and direct scalar/allowlisted metrics
     for key, value in raw_payload.items():
+        if not isinstance(key, str):
+            logger.debug("Privacy: dropped non-string key %r", key)
+            fields_dropped = True
+            continue
+
         if _is_pii_field(key):
             logger.info("Privacy: stripped PII field '%s'", key)
             pii_stripped = True
             continue
 
-        # Accept the field — only retain scalar numeric / string values
+        if isinstance(value, dict):
+            nested_dicts.append((key, value))
+            continue
+
         if isinstance(value, bool):
             # Booleans are uninformative metrics — drop silently
             fields_dropped = True
             continue
-        elif isinstance(value, dict):
-            # Recurse for nested metric objects (allowlist applied recursively inside).
-            # The parent key itself does not need to be on the allowlist; its children do.
-            if _is_pii_field(key):
-                logger.info("Privacy: stripped PII nested object '%s'", key)
-                pii_stripped = True
-                continue
-            sub_filtered, _ = filter_payload(value)
-            filtered.update(sub_filtered)
-            if sub_filtered:
-                fields_dropped = True  # mark that parent key was absorbed
-        elif not _is_permitted_field(key):
+
+        if not _is_permitted_field(key):
             logger.debug("Privacy: dropped non-allowlisted field '%s'", key)
             fields_dropped = True
-        elif isinstance(value, (int, float, str)):
+            continue
+
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            logger.debug("Privacy: dropped non-finite float in field '%s'", key)
+            fields_dropped = True
+            continue
+
+        if isinstance(value, str):
+            if len(value) > MAX_METADATA_STRING_LEN:
+                logger.debug("Privacy: dropped excessively long string in field '%s'", key)
+                fields_dropped = True
+                continue
+            filtered[key] = value
+        elif isinstance(value, (int, float)):
             filtered[key] = value
         else:
             logger.debug("Privacy: dropped field '%s' with unsupported type %s", key, type(value).__name__)
             fields_dropped = True
+
+    # Pass 2: Process nested dictionaries (cannot overwrite top-level metrics)
+    for key, value in nested_dicts:
+        if _is_pii_field(key):
+            logger.info("Privacy: stripped PII nested object '%s'", key)
+            pii_stripped = True
+            continue
+
+        sub_filtered, sub_tags = filter_payload(value)
+        if "pii_removed" in sub_tags:
+            pii_stripped = True
+        if "fields_allowlisted" in sub_tags or sub_filtered:
+            fields_dropped = True
+
+        for sub_k, sub_v in sub_filtered.items():
+            if sub_k not in filtered:
+                filtered[sub_k] = sub_v
+            else:
+                fields_dropped = True
 
     tags: List[str] = []
     if pii_stripped:

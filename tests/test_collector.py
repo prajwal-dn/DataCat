@@ -584,3 +584,70 @@ class TestFullCollectorPipeline:
         }
         _, _, suppressed = apply_privacy_policy(all_pii)
         assert suppressed is True
+
+class TestPrivacyEngineSecurity:
+
+    def test_non_finite_numbers_are_dropped(self):
+        import math
+
+        payload = {
+            "cpu_pct": float("nan"),
+            "ram_pct": float("inf"),
+            "disk_pct": 45.0,
+        }
+
+        filtered, tags = filter_payload(payload)
+
+        assert "cpu_pct" not in filtered
+        assert "ram_pct" not in filtered
+        assert filtered["disk_pct"] == 45.0
+        assert "fields_allowlisted" in tags
+
+    def test_unreasonably_long_metadata_string_is_dropped(self):
+        payload = {
+            "os_type": "A" * 1000,
+            "collector_version": "1.0.0",
+        }
+
+        filtered, tags = filter_payload(payload)
+
+        assert "os_type" not in filtered
+        assert filtered["collector_version"] == "1.0.0"
+
+    def test_nested_pii_removal_tag_is_preserved(self):
+        payload = {
+            "cpu_pct": 40.0,
+            "metrics": {
+                "ram_pct": 60.0,
+                "password": "secret",
+            },
+        }
+
+        filtered, tags = filter_payload(payload)
+
+        assert filtered["cpu_pct"] == 40.0
+        assert filtered["ram_pct"] == 60.0
+        assert "pii_removed" in tags
+
+    def test_nested_value_cannot_overwrite_top_level_metric(self):
+        payload = {
+            "cpu_pct": 40.0,
+            "metrics": {
+                "cpu_pct": 90.0,
+            },
+        }
+
+        filtered, tags = filter_payload(payload)
+
+        assert filtered["cpu_pct"] == 40.0
+
+    def test_non_string_keys_are_dropped_safely(self):
+        payload = {
+            "cpu_pct": 40.0,
+            123: "unexpected",
+        }
+
+        filtered, tags = filter_payload(payload)
+
+        assert filtered["cpu_pct"] == 40.0
+        assert "fields_allowlisted" in tags    
