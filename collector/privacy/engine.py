@@ -173,7 +173,7 @@ def filter_payload(raw_payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[st
         sub_filtered, sub_tags = filter_payload(value)
         if "pii_removed" in sub_tags:
             pii_stripped = True
-        if "fields_allowlisted" in sub_tags or sub_filtered:
+        if "fields_allowlisted" in sub_tags:
             fields_dropped = True
 
         for sub_k, sub_v in sub_filtered.items():
