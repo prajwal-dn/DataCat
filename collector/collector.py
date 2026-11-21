@@ -103,22 +103,29 @@ def run_once(private_key, tenant_id: str, event_type: str = "system.metrics") ->
     # 5. Transmit
     result = transmit(ingest_envelope, tenant_id=tenant_id, backend_url=INGEST_ENDPOINT)
 
+    if result.status_code == 409 and result.response_reason == "duplicate_event":
+        logger.info(
+            "Event already exists in backend: event_id=%s",
+            result.event_id,
+        )
+        return True
+
     if result.success:
         logger.info(
-            "✓ Event accepted by backend: event_id=%s stored_at=%s",
+            "Event accepted by backend: event_id=%s stored_at=%s",
             result.event_id,
             result.backend_stored_at,
         )
         return True
-    else:
-        logger.warning(
-            "✗ Event rejected or failed: event_id=%s status=%d reason=%s error=%s",
-            result.event_id,
-            result.status_code,
-            result.response_reason,
-            result.error,
-        )
-        return False
+
+    logger.warning(
+        "Event rejected or failed: event_id=%s status=%d reason=%s error=%s",
+        result.event_id,
+        result.status_code,
+        result.response_reason,
+        result.error,
+    )
+    return False
 
 
 def main():
