@@ -66,4 +66,21 @@ PII_FIELD_BLOCKLIST: list = [
 
 # Maximum payload size the collector will transmit (bytes)
 MAX_PAYLOAD_BYTES: int = int(os.getenv("DATACAT_MAX_PAYLOAD_BYTES", str(900 * 1024)))
+# Optional external TCP latency probe (disabled by default)
+LATENCY_PROBE_ENABLED: bool = (
+    os.getenv("DATACAT_LATENCY_PROBE_ENABLED", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
+LATENCY_PROBE_HOST: str = os.getenv(
+    "DATACAT_LATENCY_PROBE_HOST", "8.8.8.8"
+)
+
+LATENCY_PROBE_PORT: int = int(
+    os.getenv("DATACAT_LATENCY_PROBE_PORT", "53")
+)
+
+LATENCY_PROBE_TIMEOUT: float = float(
+    os.getenv("DATACAT_LATENCY_PROBE_TIMEOUT", "2.0")
+)
 

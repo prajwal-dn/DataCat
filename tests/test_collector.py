@@ -354,6 +354,50 @@ class TestSignEvent:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestTelemetryNormalizer:
+    def test_latency_probe_disabled_by_default(self, monkeypatch):
+        import collector.telemetry.normalizer as normalizer
+
+        monkeypatch.setattr(normalizer, "LATENCY_PROBE_ENABLED", False)
+
+        def unexpected_probe(*args, **kwargs):
+            raise AssertionError("Latency probe should not run")
+
+        monkeypatch.setattr(normalizer, "_probe_latency_ms", unexpected_probe)
+
+        result = normalizer.collect_system_metrics()
+
+        assert "latency_ms" not in result
+        assert "packet_loss" not in result
+
+    def test_enabled_latency_probe_records_latency(self, monkeypatch):
+        import collector.telemetry.normalizer as normalizer
+
+        monkeypatch.setattr(normalizer, "LATENCY_PROBE_ENABLED", True)
+        monkeypatch.setattr(normalizer, "_probe_latency_ms", lambda: 25.5)
+
+        result = normalizer.collect_system_metrics()
+
+        assert result["latency_ms"] == 25.5
+        assert "packet_loss" not in result
+
+    def test_failed_latency_probe_does_not_report_packet_loss(self, monkeypatch):
+        import collector.telemetry.normalizer as normalizer
+
+        monkeypatch.setattr(normalizer, "LATENCY_PROBE_ENABLED", True)
+        monkeypatch.setattr(normalizer, "_probe_latency_ms", lambda: None)
+
+        result = normalizer.collect_system_metrics()
+
+        assert "latency_ms" not in result
+        assert "packet_loss" not in result
+
+    def test_stub_metrics_do_not_invent_network_metrics(self):
+        import collector.telemetry.normalizer as normalizer
+
+        result = normalizer._stub_metrics()
+
+        assert "latency_ms" not in result
+        assert "packet_loss" not in result
 
     def test_normalize_metrics_passthrough(self):
         """normalize_metrics is a passthrough for already-canonical field names."""

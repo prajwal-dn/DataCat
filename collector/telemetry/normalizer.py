@@ -21,6 +21,12 @@ import platform
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from collector.config import (
+    LATENCY_PROBE_ENABLED,
+    LATENCY_PROBE_HOST,
+    LATENCY_PROBE_PORT,
+    LATENCY_PROBE_TIMEOUT,
+)
 
 logger = logging.getLogger("datacat.collector.telemetry")
 
@@ -39,21 +45,26 @@ def _now_iso() -> str:
 
 # ── Latency probe ─────────────────────────────────────────────────────────────
 
-def _probe_latency_ms(target_host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> Optional[float]:
+def _probe_latency_ms(
+    target_host: str = LATENCY_PROBE_HOST,
+    port: int = LATENCY_PROBE_PORT,
+    timeout: float = LATENCY_PROBE_TIMEOUT,
+) -> Optional[float]:
     """
-    Measure TCP connect latency to target_host:port in milliseconds.
-    Returns None if unreachable (packet loss scenario).
-    Uses raw socket to avoid DNS overhead.
+    Measure TCP connection latency to a configured endpoint.
+    Returns None if unreachable.
+
+    This measures TCP connect latency, not actual packet loss.
     """
     import socket
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        t0 = time.monotonic()
-        s.connect((target_host, port))
-        latency = (time.monotonic() - t0) * 1000.0
-        s.close()
-        return round(latency, 2)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            t0 = time.monotonic()
+            s.connect((target_host, port))
+            latency = (time.monotonic() - t0) * 1000.0
+            return round(latency, 2)
     except OSError:
         return None
 
@@ -115,16 +126,14 @@ def collect_system_metrics() -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("Network IO metric error: %s", exc)
 
-    # Latency probe (non-blocking, timeout=2s)
-    try:
-        lat = _probe_latency_ms()
-        if lat is not None:
-            raw["latency_ms"] = lat
-            raw["packet_loss"] = 0.0
-        else:
-            raw["packet_loss"] = 100.0
-    except Exception as exc:
-        logger.debug("Latency probe error: %s", exc)
+    # Optional external TCP latency probe (disabled by default)
+    if LATENCY_PROBE_ENABLED:
+        try:
+            lat = _probe_latency_ms()
+            if lat is not None:
+                raw["latency_ms"] = lat
+        except Exception as exc:
+            logger.debug("Latency probe error: %s", type(exc).__name__)
 
     # Misc system counters (non-identifying)
     try:
@@ -147,8 +156,6 @@ def _stub_metrics() -> Dict[str, Any]:
         "cpu_pct": 0.0,
         "ram_pct": 0.0,
         "disk_pct": 0.0,
-        "latency_ms": 0.0,
-        "packet_loss": 0.0,
         "os_type": platform.system(),
         "collector_version": "1.0.0",
     }
