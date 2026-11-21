@@ -112,7 +112,7 @@ def transmit(
             )
 
     except httpx.TimeoutException:
-        logger.warning("Transmission timeout: event_id=%s backend=%s", event_id, backend_url)
+        logger.warning("Transmission timeout: event_id=%s", event_id)
         return TransmissionResult(
             success=False,
             status_code=0,
@@ -121,7 +121,7 @@ def transmit(
         )
 
     except httpx.ConnectError:
-        logger.warning("Transmission connect error: event_id=%s backend=%s", event_id, backend_url)
+        logger.warning("Transmission connect error: event_id=%s", event_id)
         return TransmissionResult(
             success=False,
             status_code=0,
@@ -130,11 +130,16 @@ def transmit(
         )
 
     except Exception as exc:
-        logger.error("Transmission unexpected error: event_id=%s error=%s", event_id, str(exc))
+        error_type = type(exc).__name__
+        logger.error(
+            "Transmission unexpected error: event_id=%s error_type=%s",
+            event_id,
+            error_type,
+        )
         return TransmissionResult(
             success=False,
             status_code=0,
             event_id=event_id,
-            error=str(exc),
+            error="unexpected_error",
         )
 
